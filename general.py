@@ -268,7 +268,7 @@ class LocationHandler(BaseHandler):
                     {"division": { "terms": {"field": "division"}}},
                     {"division_id": { "terms": {"field": "division_id"}}}
                 ])
-            print(query)
+            
             resp = yield self.asynchronous_fetch(query)
             if loc =="country":
                 for rec in resp["aggregations"]["loc_agg"]["buckets"]:

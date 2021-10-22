@@ -1,13 +1,13 @@
 import tornado.ioloop
 import tornado.web
 from general import LocationHandler
-from elasticsearch import Elasticsearch
+from elasticsearch import AsyncElasticsearch
 from lineage import LineageByCountryHandler, LineageByDivisionHandler, LineageAndCountryHandler, LineageAndDivisionHandler, LineageHandler, LineageMutationsHandler, MutationDetailsHandler, MutationsByLineage
 from prevalence import GlobalPrevalenceByTimeHandler, PrevalenceByLocationAndTimeHandler, CumulativePrevalenceByLocationHandler, PrevalenceAllLineagesByLocationHandler, PrevalenceByAAPositionHandler
 from general import LocationHandler, LocationDetailsHandler, MetadataHandler, MutationHandler, SubmissionLagHandler, SequenceCountHandler, MostRecentSubmissionDateHandler, MostRecentCollectionDateHandler, GisaidIDHandler
 
 
-es = Elasticsearch('http://localhost:9200')
+es = AsyncElasticsearch('http://localhost:9200')
 
 if __name__ == "__main__":
     application = tornado.web.Application([
