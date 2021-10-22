@@ -21,9 +21,112 @@ def create_index(client):
             "settings": {"number_of_shards": 1},
             "mappings": {
                 "properties": {
-                    "country": {"type": "keyword"},
-                    "division": {"type": "keyword"},
-                    "location": {"type": "keyword"},
+                "type": {
+                        "type": "keyword"
+                        },
+                    "mutation": {
+                        "type": "keyword",
+                        "normalizer": "keyword_lowercase_normalizer"
+                        },
+                    "gene": {
+                        "type": "keyword"
+                        },
+                    "ref_codon": {
+                        "type": "keyword"
+                        },
+                    "pos": {
+                        "type": "keyword"
+                        },
+                    "alt_codon": {
+                        "type": "keyword"
+                        },
+                    "is_synonymous": {
+                        "type": "keyword"
+                        },
+                    "ref_aa": {
+                        "type": "keyword"
+                        },
+                    "codon_num": {
+                        "type": "keyword"
+                        },
+                    "alt_aa": {
+                        "type": "keyword"
+                        },
+                    "absolute_coords": {
+                        "type": "keyword"
+                        },
+                    "change_length_nt": {
+                        "type": "keyword"
+                        },
+                    "nt_map_coords": {
+                        "type": "keyword"
+                        },
+                    "aa_map_coords": {
+                        "type": "keyword"
+                        }
+                    }
+                },
+            "division": {
+                "type": "keyword",
+                },
+            "division_lower": {
+                "type": "keyword",
+                "normalizer": "keyword_lowercase_normalizer"
+
+                },
+        "country": {
+                "type": "keyword",
+                },
+        "country_lower": {
+                "type": "keyword",
+                "normalizer": "keyword_lowercase_normalizer"
+
+                },
+        "date_submitted": {
+                "type": "keyword"
+                },
+        "date_collected": {
+                "type": "keyword"
+                },
+        "date_modified": {
+                "type": "keyword"
+                },
+        "country_id": {
+                "type": "keyword"
+                },
+        "authors": {
+                "type": "keyword"
+                },
+        "pangolin_lineage": {
+                "type": "keyword",
+                "normalizer": "keyword_lowercase_normalizer"
+
+                },
+        "location": {
+                "type": "keyword"
+                },
+        "location_lower": {
+                "type": "keyword",
+                "normalizer": "keyword_lowercase_normalizer"
+                },
+        "location_id": {
+                "type": "keyword"
+                },
+        "division_id": {
+                "type": "keyword"
+                },
+        "accession_id": {
+                "type": "keyword"
+                },
+        "clade": {
+                "type": "keyword"
+                },
+        "pango_version": {
+                "type": "keyword"
+                },
+        "country_normed": {
+                "type": "keyword"
+                }                   
                 }
             },
         },
@@ -33,13 +136,9 @@ def create_index(client):
 
 def generate_actions(data):
     for row in data:
-        doc = {
-            "_id": row["strain"],
-            "country": row["country"],
-            "division": row["division"],
-            "division": row["location"],
-        }
-        yield doc
+        print(row)
+        row['_id'] = row['strain']
+        yield row
 
 def main():
     print("Loading dataset...")
