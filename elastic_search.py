@@ -14,151 +14,82 @@ def download_dataset(json_filename):
     return(data)
 
 def create_index(client):
-    
     client.indices.create(
         index="hcov19",
         body={
-            "settings": {"number_of_shards": 1},
+            "settings": {"number_of_shards": 1},            
             "mappings": {
-                "properties": {
-                "type": {
-                        "type": "keyword"
-                        },
-                    "mutation": {
-                        "type": "keyword",
-                        "normalizer": "keyword_lowercase_normalizer"
-                        },
-                    "gene": {
-                        "type": "keyword"
-                        },
-                    "ref_codon": {
-                        "type": "keyword"
-                        },
-                    "pos": {
-                        "type": "keyword"
-                        },
-                    "alt_codon": {
-                        "type": "keyword"
-                        },
-                    "is_synonymous": {
-                        "type": "keyword"
-                        },
-                    "ref_aa": {
-                        "type": "keyword"
-                        },
-                    "codon_num": {
-                        "type": "keyword"
-                        },
-                    "alt_aa": {
-                        "type": "keyword"
-                        },
-                    "absolute_coords": {
-                        "type": "keyword"
-                        },
-                    "change_length_nt": {
-                        "type": "keyword"
-                        },
-                    "nt_map_coords": {
-                        "type": "keyword"
-                        },
-                    "aa_map_coords": {
-                        "type": "keyword"
-                        }
-                    }
-                },
-            "division": {
-                "type": "keyword",
-                },
-            "division_lower": {
-                "type": "keyword",
-                "normalizer": "keyword_lowercase_normalizer"
-
-                },
-        "country": {
-                "type": "keyword",
-                },
-        "country_lower": {
-                "type": "keyword",
-                "normalizer": "keyword_lowercase_normalizer"
-
-                },
-        "date_submitted": {
-                "type": "keyword"
-                },
-        "date_collected": {
-                "type": "keyword"
-                },
-        "date_modified": {
-                "type": "keyword"
-                },
-        "country_id": {
-                "type": "keyword"
-                },
-        "authors": {
-                "type": "keyword"
-                },
-        "pangolin_lineage": {
-                "type": "keyword",
-                "normalizer": "keyword_lowercase_normalizer"
-
-                },
-        "location": {
-                "type": "keyword"
-                },
-        "location_lower": {
-                "type": "keyword",
-                "normalizer": "keyword_lowercase_normalizer"
-                },
-        "location_id": {
-                "type": "keyword"
-                },
-        "division_id": {
-                "type": "keyword"
-                },
-        "accession_id": {
-                "type": "keyword"
-                },
-        "clade": {
-                "type": "keyword"
-                },
-        "pango_version": {
-                "type": "keyword"
-                },
-        "country_normed": {
-                "type": "keyword"
-                }                   
-                }
-            },
+            "properties": {
+                 "strain" :{"type":"keyword"},
+                 "country": {"type":"keyword"},
+                 "country_id" : {"type":"keyword"},
+                 "country_lower": {"type":"keyword"},
+                 "division": {"type":"keyword"},
+                 "division_id": {"type": "keyword"},
+                 "division_lower": {"type": "keyword"},
+                 "location": {"type":"keyword"},
+                 "location_id": {"type": "keyword"},
+                 "location_lower": {"type": "keyword"},
+                 "accession_id": {"type": "keyword"},
+            }
+            }
         },
-        ignore=400,
-    )
+        ignore=400,)
 
 
 def generate_actions(data):
-    for row in data:
-        print(row)
-        row['_id'] = row['strain']
-        yield row
+    new_dict = {}
+    for i,row in enumerate(data):
+        new_dict['_id'] = i
+        new_dict['strain'] = row['strain']
+        new_dict['country'] = str(row['country'])
+        new_dict['country_id'] = str(row['country_id'])
+        new_dict['country_lower'] = str(row['country_lower'])
+        new_dict['division'] = str(row['division'])
+        new_dict['division_id'] = str(row['division_id'])
+        new_dict['division_lower'] = str(row['division_lower'])
+        new_dict['location'] = str(row['location'])
+        new_dict['location_id'] = str(row['location_id'])
+        new_dict['location_lower'] = str(row['location_lower'])
+        new_dict['accession_id'] = str(row['accession_id'])
+        yield new_dict
 
 def main():
+    json_filename = 'new_api_data.json'
     print("Loading dataset...")
-    number_of_docs = download_dataset()
-
+    data = download_dataset(json_filename)
+    
     client = Elasticsearch()
     print("Creating an index...")
     create_index(client)
 
     print("Indexing documents...")
-    progress = tqdm.tqdm(unit="docs", total=number_of_docs)
+    progress = tqdm.tqdm(unit="docs", total=len(data))
     successes = 0
     for ok, action in streaming_bulk(
-        client=client, index="hcov19", actions=generate_actions(),
+        client=client, index="hcov19", actions=generate_actions(data),
     ):
         progress.update(1)
         successes += ok
-    print("Indexed %d/%d documents" % (successes, number_of_docs))
+    print("Indexed %d/%d documents" % (successes, len(data)))
 
 
 if __name__ == "__main__":
     main()
-
+"""
+"mutations": {"type" : "nested",
+                    "properties" : {
+                    "mutation": {"type": "keyword", "normalizer": "keyword_lowercase_normalizer"},
+                    "gene": {"type": "keyword"},
+                    "ref_codon": {"type": "keyword"},
+                    "pos": {"type": "keyword"},
+                    "alt_codon": {"type": "keyword"},
+                    "is_synonymous": {"type": "keyword"},
+                    "ref_aa": {"type": "keyword"},
+                    "codon_num": {"type": "keyword"},
+                    "alt_aa": {"type": "keyword"},
+                    "absolute_coords": {"type": "keyword"},
+                    "change_length_nt": {"type": "keyword"},
+                    "nt_map_coords": {"type": "keyword"},
+                    "aa_map_coords": {"type": "keyword"}}},
+"""

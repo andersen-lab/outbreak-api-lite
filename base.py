@@ -15,7 +15,9 @@ class BaseHandler(tornado.web.RequestHandler):
         self.es = db
 
     async def asynchronous_fetch(self, query):
-        response = await self.es.search(index='hcov19', body=query, size=0)
+        print('QUERY', query)
+        response = await self.es.search(index='hcov19', body=query)
+        print(response)
         return response
 
     
