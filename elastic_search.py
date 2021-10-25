@@ -17,20 +17,31 @@ def create_index(client):
     client.indices.create(
         index="hcov19",
         body={
-            "settings": {"number_of_shards": 1},            
+            "settings": {"number_of_shards": 1,
+                "analysis": {
+                    "normalizer": {
+                        "keyword_lowercase": {
+                        "type": "custom",
+                        "filter": ["lowercase"]
+                        }
+                    }
+                }
+            },            
             "mappings": {
             "properties": {
+                 "@timestamp" : {"type" : "date", "format": "date_optional_time||epoch_millis" },
                  "strain" :{"type":"keyword"},
                  "country": {"type":"keyword"},
                  "country_id" : {"type":"keyword"},
-                 "country_lower": {"type":"keyword"},
+                 "country_lower": {"type":"keyword", "normalizer":"keyword_lowercase"},
                  "division": {"type":"keyword"},
                  "division_id": {"type": "keyword"},
-                 "division_lower": {"type": "keyword"},
+                 "division_lower": {"type": "keyword", "normalizer":"keyword_lowercase"},
                  "location": {"type":"keyword"},
                  "location_id": {"type": "keyword"},
-                 "location_lower": {"type": "keyword"},
+                 "location_lower": {"type": "keyword", "normalizer":"keyword_lowercase"},
                  "accession_id": {"type": "keyword"},
+                 
                  "mutations" : {"type" : "nested",
                     "properties":{
                         "mutation" : {"type":"keyword"},
@@ -47,18 +58,23 @@ def create_index(client):
                         "change_length_nt" : {"type": "keyword"},
                         "nt_map_coords" : {"type": "keyword"},
                         "aa_map_coords" : {"type": "keyword"},
-
-                    }
-                 }
-                 },
+                   },
+                   },
+                   "pangolin_lineage" : {"type": "keyword", "normalizer":"keyword_lowercase"},
+                   "pango_version" : {"type": "keyword"},
+                   "clade" : {"type":"keyword"},
+                   "date_collected" : {"type":"keyword"},
+                   "date_modified" : {"type":"keyword"},
+                   "date_submitted" : {"type":"keyword"},
+            },
             },
         },
         ignore=400,)
 
 
 def generate_actions(data):
-    new_dict = {}
     for i,row in enumerate(data):
+        new_dict = {}
         new_dict['_id'] = i
         new_dict['strain'] = row['strain']
         new_dict['country'] = str(row['country'])
@@ -71,7 +87,15 @@ def generate_actions(data):
         new_dict['location_id'] = str(row['location_id'])
         new_dict['location_lower'] = str(row['location_lower'])
         new_dict['accession_id'] = str(row['accession_id'])
-        
+        new_dict['pangolin_lineage'] = str(row['pangolin_lineage'])
+        if 'pango_version' in row:
+            new_dict['pango_version'] = str(row['pango_version'])
+        if 'clade' in row:
+            new_dict['clade'] = str(row['clade'])
+        new_dict['date_submitted'] = str(row['date_submitted'])
+        new_dict['date_collected'] = str(row['date_collected'])
+        new_dict['date_modified'] = str(row['date_modified'])
+          
         temp_list = []
         
         if row['mutations'] != None:
@@ -98,8 +122,8 @@ def generate_actions(data):
                     temp['nt_map_coords'] = mut['nt_map_coords']
                 if 'aa_map_coords'  in mut:
                     temp['aa_map_coords'] = mut['aa_map_coords']
-            temp_list.append(temp)
-
+            temp_list.append(temp) 
+       
         new_dict['mutations'] = temp_list
         yield new_dict
 
@@ -107,7 +131,12 @@ def main():
     json_filename = 'new_api_data.json'
     print("Loading dataset...")
     data = download_dataset(json_filename)
-   
+    
+    for d in data:
+        if 'pangolin_lineage' in d:
+            print(d['pangolin_lineage'])
+    
+
     client = Elasticsearch()
     print("Creating an index...")
     create_index(client)
