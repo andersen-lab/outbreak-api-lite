@@ -31,8 +31,27 @@ def create_index(client):
                  "location_id": {"type": "keyword"},
                  "location_lower": {"type": "keyword"},
                  "accession_id": {"type": "keyword"},
-            }
-            }
+                 "mutations" : {"type" : "nested",
+                    "properties":{
+                        "mutation" : {"type":"keyword"},
+                        "type" : {"type":"keyword"},
+                        "gene" : {"type":"keyword"},
+                        "ref_codon" : {"type":"keyword"},
+                        "pos" : {"type":"keyword"},
+                        "alt_codon" : {"type":"keyword"},
+                        "is_synonymous" : {"type":"keyword"},
+                        "ref_aa" : {"type":"keyword"},
+                        "codon_num" : {"type":"keyword"},
+                        "alt_aa" : {"type":"keyword"},
+                        "absolute_coords" : {"type": "keyword"},
+                        "change_length_nt" : {"type": "keyword"},
+                        "nt_map_coords" : {"type": "keyword"},
+                        "aa_map_coords" : {"type": "keyword"},
+
+                    }
+                 }
+                 },
+            },
         },
         ignore=400,)
 
@@ -52,13 +71,43 @@ def generate_actions(data):
         new_dict['location_id'] = str(row['location_id'])
         new_dict['location_lower'] = str(row['location_lower'])
         new_dict['accession_id'] = str(row['accession_id'])
+        
+        temp_list = []
+        
+        if row['mutations'] != None:
+            temp = {}
+            for mut in row['mutations']:
+                temp['mutation'] = mut['mutation']
+                temp['type'] = mut['type']
+                temp['gene'] = mut['gene']
+                temp['ref_codon'] = mut['ref_codon']
+                temp['pos'] = mut['pos']
+                if 'alt_codon' in mut:
+                    temp['alt_codon'] = mut['alt_codon']
+                temp['is_synonymous'] = mut['is_synonymous']
+                if 'ref_aa' in mut:
+                    temp['ref_aa'] = mut['ref_aa']
+                temp['codon_num'] = mut['codon_num']
+                if 'alt_aa' in mut:
+                    temp['alt_aa'] = mut['alt_aa']
+                if 'absolute_coords' in mut:
+                    temp['absolute_coords'] = mut['absolute_coords']
+                if 'change_length_nt' in mut:
+                    temp['change_length_nt'] = mut['change_length_nt']
+                if 'nt_map_coords' in mut:
+                    temp['nt_map_coords'] = mut['nt_map_coords']
+                if 'aa_map_coords'  in mut:
+                    temp['aa_map_coords'] = mut['aa_map_coords']
+            temp_list.append(temp)
+
+        new_dict['mutations'] = temp_list
         yield new_dict
 
 def main():
     json_filename = 'new_api_data.json'
     print("Loading dataset...")
     data = download_dataset(json_filename)
-    
+   
     client = Elasticsearch()
     print("Creating an index...")
     create_index(client)
@@ -76,20 +125,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-"""
-"mutations": {"type" : "nested",
-                    "properties" : {
-                    "mutation": {"type": "keyword", "normalizer": "keyword_lowercase_normalizer"},
-                    "gene": {"type": "keyword"},
-                    "ref_codon": {"type": "keyword"},
-                    "pos": {"type": "keyword"},
-                    "alt_codon": {"type": "keyword"},
-                    "is_synonymous": {"type": "keyword"},
-                    "ref_aa": {"type": "keyword"},
-                    "codon_num": {"type": "keyword"},
-                    "alt_aa": {"type": "keyword"},
-                    "absolute_coords": {"type": "keyword"},
-                    "change_length_nt": {"type": "keyword"},
-                    "nt_map_coords": {"type": "keyword"},
-                    "aa_map_coords": {"type": "keyword"}}},
-"""
