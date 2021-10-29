@@ -54,6 +54,7 @@ class SequenceCountHandler(BaseHandler):
                         }
                     }
                 }
+                
                 resp = yield self.asynchronous_fetch(query)
                 parse_id = lambda x,y: x
                 if subadmin == "division_id":
@@ -66,9 +67,20 @@ class SequenceCountHandler(BaseHandler):
                 } for i in resp["aggregations"]["subadmin"]["buckets"] if i["key"].lower() != "none"]
                 flattened_response = sorted(flattened_response, key = lambda x: -x["total_count"])
             else:
+                res = yield self.asynchronous_fetch_count(query)
+                size = res['count']
+                query["sort"]=[{"date_collected": "asc", "_id": "asc"}]
                 resp = yield self.asynchronous_fetch(query)
+                bookmark = [resp['hits']['hits'][-1]['sort'][0], str(resp['hits']['hits'][-1]['sort'][1])]
+                query["search_after"]= bookmark                                
+                while len(resp['hits']['hits']) < size:
+                    res = yield self.asynchronous_fetch(query)
+                    for el in res['hits']['hits']:
+                        resp['hits']['hits'].append(el)
+                        bookmark = [res['hits']['hits'][-1]['sort'][0], str(resp['hits']['hits'][-1]['sort'][1])]
+                
                 flattened_response = {
-                    "total_count": resp["hits"]["total"]
+                    "total_count": len(resp['hits']['hits'])
                 }
         resp = {"success": True, "results": flattened_response}
         self.write(resp)
@@ -400,7 +412,6 @@ class SubmissionLagHandler(BaseHandler):
         self.write(resp)
 
 class MetadataHandler(BaseHandler):
-
     @gen.coroutine
     def get(self):
         mapping = yield self.get_mapping()
