@@ -172,6 +172,7 @@ class CumulativePrevalenceByLocationHandler(BaseHandler):
                     if len(i["key"]["date_collected"].split("-")) < 3 or "XX" in i["key"]["date_collected"]:
                         continue
                     # Check for None and out of state
+                   
                     if i["key"]["sub"].lower().replace("-", "").replace(" ", "") == "outofstate":
                         i["key"]["sub"] = "Out of state"
                     if i["key"]["sub"].lower() in ["none", "unknown"]:
@@ -253,7 +254,7 @@ class PrevalenceAllLineagesByLocationHandler(BaseHandler):
                     "total_count": i["doc_count"],
                     "lineage_count": j["doc_count"],
                     "lineage": j["key"]
-                })
+                })  
         df_response = (
             pd.DataFrame(flattened_response)
             .assign(

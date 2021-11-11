@@ -67,21 +67,27 @@ class SequenceCountHandler(BaseHandler):
                 } for i in resp["aggregations"]["subadmin"]["buckets"] if i["key"].lower() != "none"]
                 flattened_response = sorted(flattened_response, key = lambda x: -x["total_count"])
             else:
+                
                 res = yield self.asynchronous_fetch_count(query)
                 size = res['count']
+                """ 
                 query["sort"]=[{"date_collected": "asc", "_id": "asc"}]
+                query['size'] = 10000
                 resp = yield self.asynchronous_fetch(query)
                 bookmark = [resp['hits']['hits'][-1]['sort'][0], str(resp['hits']['hits'][-1]['sort'][1])]
-                query["search_after"]= bookmark                                
+                query["search_after"]= bookmark   
                 while len(resp['hits']['hits']) < size:
+                    #print(len(resp['hits']['hits']))
                     res = yield self.asynchronous_fetch(query)
                     for el in res['hits']['hits']:
                         resp['hits']['hits'].append(el)
                         bookmark = [res['hits']['hits'][-1]['sort'][0], str(resp['hits']['hits'][-1]['sort'][1])]
-                
+                print(len(resp['hits']['hits']))
                 flattened_response = {
                     "total_count": len(resp['hits']['hits'])
                 }
+                """
+                flattened_response = { "total_count" : size}
         resp = {"success": True, "results": flattened_response}
         self.write(resp)
 
@@ -235,6 +241,96 @@ class LocationDetailsHandler(BaseHandler):
         resp = {"success": True, "results": flattened_response}
         self.write(resp)
 
+class Shape(BaseHandler):
+
+    # Use dict to map to NE IDs from epi data
+    country_iso3_to_iso2 = {"BGD": "BD", "BEL": "BE", "BFA": "BF", "BGR": "BG", "BIH": "BA", "BRB": "BB", "WLF": "WF", "BLM": "BL", "BMU": "BM", "BRN": "BN", "BOL": "BO", "BHR": "BH", "BDI": "BI", "BEN": "BJ", "BTN": "BT", "JAM": "JM", "BVT": "BV", "BWA": "BW", "WSM": "WS", "BES": "BQ", "BRA": "BR", "BHS": "BS", "JEY": "JE", "BLR": "BY", "BLZ": "BZ", "RUS": "RU", "RWA": "RW", "SRB": "RS", "TLS": "TL", "REU": "RE", "TKM": "TM", "TJK": "TJ", "ROU": "RO", "TKL": "TK", "GNB": "GW", "GUM": "GU", "GTM": "GT", "SGS": "GS", "GRC": "GR", "GNQ": "GQ", "GLP": "GP", "JPN": "JP", "GUY": "GY", "GGY": "GG", "GUF": "GF", "GEO": "GE", "GRD": "GD", "GBR": "GB", "GAB": "GA", "SLV": "SV", "GIN": "GN", "GMB": "GM", "GRL": "GL", "GIB": "GI", "GHA": "GH", "OMN": "OM", "TUN": "TN", "JOR": "JO", "HRV": "HR", "HTI": "HT", "HUN": "HU", "HKG": "HK", "HND": "HN", "HMD": "HM", "VEN": "VE", "PRI": "PR", "PSE": "PS", "PLW": "PW", "PRT": "PT", "SJM": "SJ", "PRY": "PY", "IRQ": "IQ", "PAN": "PA", "PYF": "PF", "PNG": "PG", "PER": "PE", "PAK": "PK", "PHL": "PH", "PCN": "PN", "POL": "PL", "SPM": "PM", "ZMB": "ZM", "ESH": "EH", "EST": "EE", "EGY": "EG", "ZAF": "ZA", "ECU": "EC", "ITA": "IT", "VNM": "VN", "SLB": "SB", "ETH": "ET", "SOM": "SO", "ZWE": "ZW", "SAU": "SA", "ESP": "ES", "ERI": "ER", "MNE": "ME", "MDA": "MD", "MDG": "MG", "MAF": "MF", "MAR": "MA", "MCO": "MC", "UZB": "UZ", "MMR": "MM", "MLI": "ML", "MAC": "MO", "MNG": "MN", "MHL": "MH", "MKD": "MK", "MUS": "MU", "MLT": "MT", "MWI": "MW", "MDV": "MV", "MTQ": "MQ", "MNP": "MP", "MSR": "MS", "MRT": "MR", "IMN": "IM", "UGA": "UG", "TZA": "TZ", "MYS": "MY", "MEX": "MX", "ISR": "IL", "FRA": "FR", "IOT": "IO", "SHN": "SH", "FIN": "FI", "FJI": "FJ", "FLK": "FK", "FSM": "FM", "FRO": "FO", "NIC": "NI", "NLD": "NL", "NOR": "NO", "NAM": "NA", "VUT": "VU", "NCL": "NC", "NER": "NE", "NFK": "NF", "NGA": "NG", "NZL": "NZ", "NPL": "NP", "NRU": "NR", "NIU": "NU", "COK": "CK", "XKX": "XK", "CIV": "CI", "CHE": "CH", "COL": "CO", "CHN": "CN", "CMR": "CM", "CHL": "CL", "CCK": "CC", "CAN": "CA", "COG": "CG", "CAF": "CF", "COD": "CD", "CZE": "CZ", "CYP": "CY", "CXR": "CX", "CRI": "CR", "CUW": "CW", "CPV": "CV", "CUB": "CU", "SWZ": "SZ", "SYR": "SY", "SXM": "SX", "KGZ": "KG", "KEN": "KE", "SSD": "SS", "SUR": "SR", "KIR": "KI", "KHM": "KH", "KNA": "KN", "COM": "KM", "STP": "ST", "SVK": "SK", "KOR": "KR", "SVN": "SI", "PRK": "KP", "KWT": "KW", "SEN": "SN", "SMR": "SM", "SLE": "SL", "SYC": "SC", "KAZ": "KZ", "CYM": "KY", "SGP": "SG", "SWE": "SE", "SDN": "SD", "DOM": "DO", "DMA": "DM", "DJI": "DJ", "DNK": "DK", "VGB": "VG", "DEU": "DE", "YEM": "YE", "DZA": "DZ", "USA": "US", "URY": "UY", "MYT": "YT", "UMI": "UM", "LBN": "LB", "LCA": "LC", "LAO": "LA", "TUV": "TV", "TWN": "TW", "TTO": "TT", "TUR": "TR", "LKA": "LK", "LIE": "LI", "LVA": "LV", "TON": "TO", "LTU": "LT", "LUX": "LU", "LBR": "LR", "LSO": "LS", "THA": "TH", "ATF": "TF", "TGO": "TG", "TCD": "TD", "TCA": "TC", "LBY": "LY", "VAT": "VA", "VCT": "VC", "ARE": "AE", "AND": "AD", "ATG": "AG", "AFG": "AF", "AIA": "AI", "VIR": "VI", "ISL": "IS", "IRN": "IR", "ARM": "AM", "ALB": "AL", "AGO": "AO", "ATA": "AQ", "ASM": "AS", "ARG": "AR", "AUS": "AU", "AUT": "AT", "ABW": "AW", "IND": "IN", "ALA": "AX", "AZE": "AZ", "IRL": "IE", "IDN": "ID", "UKR": "UA", "QAT": "QA", "MOZ": "MZ"}
+
+    location_types = ["country", "division", "location"]
+
+    @gen.coroutine
+    def get(self):
+        response = ''
+        query_location = self.get_argument("location_id", None)
+        flattened_response = []
+        results={}
+        query = {
+            "size": 1000,
+            "aggs": {
+                "sub_date_buckets": {
+                    "composite": {
+                        "size": 10000,
+                        "sources": [
+                            {"date_collected": { "terms": {"field": "date_collected"}}}
+                        ]
+                    },
+                    
+                }
+            }
+        }
+
+    
+        if query_location is not None: # Global
+            query["query"] = parse_location_id_to_query(query_location)
+            admin_level = 0
+
+        if len(query_location.split("_")) == 2:
+            query["aggs"]["sub_date_buckets"]["composite"]["sources"].extend([
+                {"sub_id": { "terms": {"field": "location_id"} }},
+                {"sub": { "terms": {"field": "location"} }}
+            ])
+            admin_level = 2
+        
+        elif len(query_location.split("_")) == 1:
+            query["aggs"]["sub_date_buckets"]["composite"]["sources"].extend([
+                {"sub_id": { "terms": {"field": "division_id"} }},
+                {"sub": { "terms": {"field": "division"} }}
+            ])
+            admin_level = 1 
+         
+        resp = yield self.asynchronous_fetch_shape(query)
+        flattened_response.append(resp['hits']['hits'])
+
+        ctr = 0
+        buckets = resp["aggregations"]["sub_date_buckets"]["buckets"]
+        # Get all paginated results
+        while "after_key" in resp["aggregations"]["sub_date_buckets"]:
+            print('ere')
+            query["aggs"]["sub_date_buckets"]["composite"]["after"] = resp["aggregations"]["sub_date_buckets"]["after_key"]
+            resp = yield self.asynchronous_fetch_shape(query)
+            #print(resp)
+            buckets.extend(resp["aggregations"]["sub_date_buckets"]["buckets"])
+        dict_response = {}
+        if len(buckets) > 0:
+            flattened_response = []
+            for i in buckets:
+                if len(i["key"]["date_collected"].split("-")) < 3 or "XX" in i["key"]["date_collected"]:
+                    continue
+                # Check for None and out of state
+
+                if i["key"]["sub"].lower().replace("-", "").replace(" ", "") == "outofstate":
+                    i["key"]["sub"] = "Out of state"
+                if i["key"]["sub"].lower() in ["none", "unknown"]:
+                    i["key"]["sub"] = "Unknown"
+                rec = {
+                    "date": i["key"]["date_collected"],
+                    "name": i["key"]["sub"],
+                    "id": i["key"]["sub_id"],
+                    "total_count": i["doc_count"],
+                    "lineage_count": i["lineage_count"]["doc_count"]
+                }
+                if admin_level == 1:
+                    rec["id"] = "_".join([query_location, self.country_iso3_to_iso2[query_location]+"-"+i["key"]["sub_id"] if query_location in self.country_iso3_to_iso2 else query_location + "-" + i["key"]["sub_id"]])
+                elif admin_level == 2:
+                    rec["id"] = "_".join([query_location, i["key"]["sub_id"]])
+                flattened_response.append(rec) 
+
+
+
+        resp = {"success": True, "results": flattened_response}
+        self.write(resp)
+
+
 class LocationHandler(BaseHandler):
 
     # Use dict to map to NE IDs from epi data
@@ -282,6 +378,7 @@ class LocationHandler(BaseHandler):
                 ])
             
             resp = yield self.asynchronous_fetch(query)
+            
             if loc =="country":
                 for rec in resp["aggregations"]["loc_agg"]["buckets"]:
                     flattened_response.append({

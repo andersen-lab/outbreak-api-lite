@@ -11,24 +11,27 @@ class BaseHandler(tornado.web.RequestHandler):
 
     size = 10000
 
-    def initialize(self, db):
+    def initialize(self, db, db2):
         self.es = db
+        self.na = db2
+
+    async def asynchronous_fetch_shape(self, query):
+        response = await self.es.search(index='shape', body=query)
+        return response
 
     async def asynchronous_fetch(self, query):
-        print('QUERY', query)
         response = await self.es.search(index='hcov19', body=query)
-        print(response)
         return response
 
     
     async def asynchronous_fetch_count(self, query):
-        response = await self.es.search.count(
+        response = await self.es.count(
             index="hcov19",
             body=query)
         return response
 
     async def get_mapping(self):
-        response = await self.es.search.indices.get_mapping("hcov19")
+        response = self.na.indices.get_mapping("hcov19")
         return response
 
     def post(self):
