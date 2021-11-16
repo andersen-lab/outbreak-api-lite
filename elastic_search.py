@@ -6,7 +6,7 @@ import tqdm
 import urllib3
 import requests
 import zipfile
-
+import pandas as pd
 from elasticsearch import Elasticsearch
 from elasticsearch.helpers import streaming_bulk
 
@@ -26,6 +26,82 @@ def get_gpkg(countries):
         #find and delete all non shape files
         #os.system("find ./shapefiles -type f  ! -name '*.shp'  -delete")
 
+def simplify_gpk_zipcode():
+    location = './Census_ZIP.geojson'
+    
+    from shapely.geometry import shape as sh
+    from shapely.geometry import GeometryCollection
+    import shapely
+    import shapefile
+    count=0
+    import ast
+    doc=''
+    with open(location, "r") as gjson:
+        for line in gjson:
+            doc += line.strip()
+    
+    geojson_list = ast.literal_eval(doc)['features']
+    for c,feature in enumerate(geojson_list): 
+        new_dict = {}
+        geojson_temp = { "type": "Feature"}
+        
+        zipcode = feature['properties']['ZIP']
+        zipcode_name = feature['properties']['COMMUNITY']
+        from collections.abc import Iterable
+        def flatten(l):
+            for el in l:
+                if isinstance(el, Iterable) and not isinstance(el, (str, bytes)):
+                    yield from flatten(el)
+                else:
+                    yield el
+        def recursive_len(item):
+            if type(item) == list:
+                return sum(recursive_len(subitem) for subitem in item)
+            else:
+                return 1
+
+        def recur(lst):
+            if isinstance(lst,float):
+                return (lst,4) #use round(lst,2) if you want float instead of string.
+            else:
+                if isinstance(lst, list):
+                    return [recur(i) for i in lst]
+                elif type(lst) == tuple:
+                    return ((recur(i for i in lst)))
+        
+        
+        total_coordinates = recursive_len(feature['geometry']['coordinates']) 
+        flat_earth = list(flatten(feature['geometry']['coordinates']))
+        total_bytes = sys.getsizeof(flat_earth)
+        total_coordinates = recursive_len(feature['geometry']['coordinates'])
+        if total_bytes > 50000:
+            sim = 0.0025
+        elif 30000 < total_bytes <= 50000:
+            sim = 0.0001
+        elif 20000 < total_bytes <= 30000:
+            sim = 0.0001
+        elif 10000 < total_bytes <= 20000:
+            sim = 0.00005
+        elif 5000 < total_bytes <= 10000:
+            sim = 0.000001
+        else:
+            sim = 0.0000001
+        
+        shp_geom = sh(feature["geometry"]).buffer(0)
+        
+        s = shp_geom.simplify(sim, preserve_topology=False)
+        
+       
+        new_dict['_id']=count
+        count += 1
+        new_dict['zipcode'] = zipcode
+        new_dict['zipcode_name'] = zipcode_name
+        goejson_temp={}
+        geojson_temp['geometry'] = shapely.geometry.mapping(s)
+        new_dict['shape'] = json.dumps(geojson_temp,separators=(',', ':'))
+        print(total_bytes, total_coordinates)           
+        yield new_dict
+     
 def simplify_gpkg():
     location = './shapefiles'
     all_shp_files = os.listdir(location)
@@ -108,9 +184,7 @@ def simplify_gpkg():
             #print(geojson)
             new_dict['shape'] = json.dumps(geojson)
             #print(new_dict)
-            if feature.record[0] == 'USA' and division_id == 'CA':
-                print(total_coordinates, sim)
- 
+
             yield new_dict
 
 
@@ -120,6 +194,31 @@ def download_dataset(json_filename):
         for line in jfile:
             data.append(json.loads(line))
     return(data)
+
+def create_zipcode(client):
+    client.indices.create(
+        index="sdzipcode",
+        body={
+            "settings": {"number_of_shards": 100,
+                "analysis": {
+                    "normalizer": {
+                        "keyword_lowercase": {
+                        "type": "custom",
+                        "filter": ["lowercase"]
+                        }
+                    }
+                }
+            },             
+            "mappings": {
+            "properties": {
+                "zipcode" : {"type":"keyword"},
+                "zipcode_name" : {"type":"keyword"},
+                "shape": {"type": "keyword"},
+                },
+            },
+        },
+        ignore=400,)
+
 
 def create_polygon(client):
     client.indices.create(
@@ -180,6 +279,8 @@ def create_index(client):
                  "location_id": {"type": "keyword"},
                  "location_lower": {"type": "keyword", "normalizer":"keyword_lowercase"},
                  "accession_id": {"type": "keyword"},
+                 "zipcode" : {"type": "keyword"},
+                 "region": {"type": "keyword"},
                  
                  "mutations" : {"type" : "nested",
                     "properties":{
@@ -211,7 +312,7 @@ def create_index(client):
         ignore=400,)
 
 
-def generate_actions(data):
+def generate_actions(data, region_df):
     test_mut_count = 0
     for i,row in enumerate(data):
         new_dict = {}
@@ -235,7 +336,12 @@ def generate_actions(data):
         new_dict['date_submitted'] = str(row['date_submitted'])
         new_dict['date_collected'] = str(row['date_collected'])
         new_dict['date_modified'] = str(row['date_modified'])
-          
+        new_dict['zipcode'] = str(row['zipcode'])
+        if str(row['zipcode']).isdigit() and int(row['zipcode']) > 0:
+            new_dict['region'] = region_df.loc[region_df['ZIP'] == int(row['zipcode'])]['Region']
+        else:
+            new_dict['region'] = "None"
+        
         temp_list = []
          
         if row['mutations'] != None:
@@ -282,8 +388,24 @@ def main():
             unique_divisions.append(item['division_id'])
     #get_gpkg(unique_countries) 
     client = Elasticsearch()
+    
+    create_zipcode(client)
+    print("Indexing shapes...")
+    progress = tqdm.tqdm(unit="docs", total=123)
+    successes = 0
+    
+    for ok, action in streaming_bulk(
+        client=client, index="sdzipcode", actions=simplify_gpk_zipcode(),
+    ):
+        progress.update(1)
+        successes += ok
+    sys.exit(0) 
+    print("Indexed %d/%d documents", successes, 123)
+    
     create_polygon(client)
-    #simplify_gpkg()
+     
+    #open the reigion-zipcode df
+    region_df = pd.read_csv("SanDiegoZIP_region.csv")
     
     print("Indexing shapes...")
     progress = tqdm.tqdm(unit="docs", total=5342)
@@ -304,7 +426,7 @@ def main():
     progress = tqdm.tqdm(unit="docs", total=len(data))
     successes = 0
     for ok, action in streaming_bulk(
-        client=client, index="hcov19", actions=generate_actions(data),
+        client=client, index="hcov19", actions=generate_actions(data, region_df),
     ):
         progress.update(1)
         successes += ok

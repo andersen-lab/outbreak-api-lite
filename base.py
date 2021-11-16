@@ -14,6 +14,10 @@ class BaseHandler(tornado.web.RequestHandler):
     def initialize(self, db, db2):
         self.es = db
         self.na = db2
+    async def asynchronous_fetch_sdzipcode(self, query):
+        response = await self.es.search(index='sdzipcode', body=query)
+        return response
+
 
     async def asynchronous_fetch_shape(self, query):
         response = await self.es.search(index='shape', body=query)

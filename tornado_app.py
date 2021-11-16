@@ -1,6 +1,6 @@
 import tornado.ioloop
 import tornado.web
-from general import LocationHandler, Shape
+from general import LocationHandler, Shape, Zipcode, ShapeByZipcode
 from elasticsearch import AsyncElasticsearch, Elasticsearch
 from lineage import LineageByCountryHandler, LineageByDivisionHandler, LineageAndCountryHandler, LineageAndDivisionHandler, LineageHandler, LineageMutationsHandler, MutationDetailsHandler, MutationsByLineage
 from prevalence import GlobalPrevalenceByTimeHandler, PrevalenceByLocationAndTimeHandler, CumulativePrevalenceByLocationHandler, PrevalenceAllLineagesByLocationHandler, PrevalenceByAAPositionHandler
@@ -12,6 +12,8 @@ na = Elasticsearch('http://localhost:9200')
 if __name__ == "__main__":
     application = tornado.web.Application([
         (r"/shape/shape", Shape, dict(db=es, db2=na)),
+        (r"/sdzipcode/shape", ShapeByZipcode, dict(db=es,db2=na)),
+        (r"/hcov19/get-zipcodes", Zipcode, dict(db=es, db2=na)),
         (r"/hcov19/location", LocationHandler, dict(db=es,db2=na)),
         (r"/hcov19/lineage-by-country", LineageByCountryHandler, dict(db=es,db2=na)),
         (r"/hcov19/lineage-and-country", LineageAndCountryHandler, dict(db=es,db2=na)),

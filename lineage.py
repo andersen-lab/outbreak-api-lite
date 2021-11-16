@@ -63,6 +63,38 @@ class LineageByDivisionHandler(BaseHandler):
         resp = yield self.asynchronous_fetch(query)
         self.write(resp)
 
+class LineageByLocationHandler(BaseHandler):
+
+    @gen.coroutine
+    def get(self):
+        query_pangolin_lineage = self.get_argument("pangolin_lineage", None)
+        query_country = self.get_argument("country", None)
+        query_country = self.get_argument("division", None)
+        query_mutations = self.get_argument("mutations", None)
+        query = {
+                "aggs": {
+                    "prevalence": {
+                        "filter" : {},
+                        "aggs": {
+                            "division": {
+                                "terms": {
+                                    "field": "division",
+                                    "size": self.size
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+        query_mutations = query_mutations.split(",") if query_mutations is not None else []
+        query_pangolin_lineage = query_pangolin_lineage.split(",") if query_pangolin_lineage is not None else []
+        query_obj = create_nested_mutation_query(country = query_country, division = query_division, lineages = query_pangolin_lineage, mutations = query_mutations)
+        query["aggs"]["prevalence"]["filter"] = query_obj
+        print(query)
+        resp = yield self.asynchronous_fetch(query)
+        self.write(resp)
+
+
 # Calculate total number of sequences with a particular lineage in a country
 class LineageAndCountryHandler(BaseHandler):
 
@@ -99,6 +131,27 @@ class LineageAndDivisionHandler(BaseHandler):
         query["query"] = query_obj
         resp = yield self.asynchronous_fetch(query)
         self.write(resp)
+
+# Calculate total number of sequences with a particular lineage in a location
+class LineageAndLocationHandler(BaseHandler):
+
+    @gen.coroutine
+    def get(self):
+        query_country = self.get_argument("country", None)
+        query_division = self.get_argument("division", None)
+        query_location = self.getargument("lcoation", None)
+        query_pangolin_lineage = self.get_argument("pangolin_lineage", None)
+        query_mutations = self.get_argument("mutations", None)
+        query = {
+                "query": {}
+        }
+        query_mutations = query_mutations.split(",") if query_mutations is not None else []
+        query_pangolin_lineage = query_pangolin_lineage.split(",") if query_pangolin_lineage is not None else []
+        query_obj = create_nested_mutation_query(country = query_country, division = query_division, location = query_location, lineages = query_pangolin_lineage, mutations = query_mutations)
+        query["query"] = query_obj
+        resp = yield self.asynchronous_fetch(query)
+        self.write(resp)
+
 
 class LineageHandler(BaseHandler):
     @gen.coroutine

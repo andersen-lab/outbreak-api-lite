@@ -46,6 +46,8 @@ class SequenceCountHandler(BaseHandler):
                     subadmin = "division_id"
                 elif len(query_location.split("_")) == 2: # Division
                     subadmin = "location_id"
+                elif len(query_location.split("_")) == 3: # Zipcode
+                    subadmin = "zipcode"
                 query["aggs"] = {
                     "subadmin": {
                         "terms": {
@@ -61,6 +63,9 @@ class SequenceCountHandler(BaseHandler):
                     parse_id = lambda x,loc_id: "_".join([loc_id, self.country_iso3_to_iso2[loc_id]+"-"+x if loc_id in self.country_iso3_to_iso2 else loc_id+"-"+x])
                 if subadmin == "location_id":
                     parse_id = lambda x,loc_id: "_".join([loc_id, x])
+                if subadmin == "zipcode":
+                    parse_id = lambda x,loc_id: "_".join([loc_id,x])
+
                 flattened_response = [{
                     "total_count": i["doc_count"],
                     "location_id": parse_id(i["key"], query_location)
@@ -199,11 +204,16 @@ class LocationDetailsHandler(BaseHandler):
                 {"division": { "terms": {"field": "division"}}},
                 {"division_id": { "terms": {"field": "division_id"} }}
             ])
-        if loc_id_len == 3: # 3 is max length
+        if loc_id_len >= 3: # 3 is max length
             query["aggs"]["loc"]["composite"]["sources"].extend([
                 {"location": { "terms": {"field": "location"}}},
                 {"location_id": { "terms": {"field": "location_id"} }}
             ])
+        if loc_id_len == 4: # Nope now we have zipcode
+            query["aggs"]["loc"]["composite"]["sources"].extend([
+                {"zipcode": { "terms": {"field": "zipcode"}}}
+            ])
+ 
         query["query"] = parse_location_id_to_query(query_str)
         resp = yield self.asynchronous_fetch(query)
         flattened_response = []
@@ -235,18 +245,193 @@ class LocationDetailsHandler(BaseHandler):
                     "label": ", ".join([rec["key"]["location"], rec["key"]["division"], rec["key"]["country"]]),
                     "admin_level": 2
                 })
+            elif loc_id_len == 4:
+                flattened_response.append({
+                    "zipcode": rec["key"]["zipcode"],
+                    "location": rec["key"]["location"],
+                    "location_id": rec["key"]["location_id"],
+                    "division": rec["key"]["division"],
+                    "division_id": rec["key"]["division_id"],
+                    "country": rec["key"]["country"],
+                    "country_id": rec["key"]["country_id"],
+                    "label": ", ".join([rec['key']['location'], rec["key"]["location"], rec["key"]["division"], rec["key"]["country"]]),
+                    "admin_level": "z"
+                })
+
         if len(flattened_response) >= 1:
             flattened_response = flattened_response[0] # ID should match only 1 region
         flattened_response["query_id"] = query_str
         resp = {"success": True, "results": flattened_response}
         self.write(resp)
 
+class Zipcode(BaseHandler):
+    """
+    Given a loc id formation location string returns all associated zipcodes.
+    """
+    # Use dict to map to NE IDs from epi data
+    country_iso3_to_iso2 = {"BGD": "BD", "BEL": "BE", "BFA": "BF", "BGR": "BG", "BIH": "BA", "BRB": "BB", "WLF": "WF", "BLM": "BL", "BMU": "BM", "BRN": "BN", "BOL": "BO", "BHR": "BH", "BDI": "BI", "BEN": "BJ", "BTN": "BT", "JAM": "JM", "BVT": "BV", "BWA": "BW", "WSM": "WS", "BES": "BQ", "BRA": "BR", "BHS": "BS", "JEY": "JE", "BLR": "BY", "BLZ": "BZ", "RUS": "RU", "RWA": "RW", "SRB": "RS", "TLS": "TL", "REU": "RE", "TKM": "TM", "TJK": "TJ", "ROU": "RO", "TKL": "TK", "GNB": "GW", "GUM": "GU", "GTM": "GT", "SGS": "GS", "GRC": "GR", "GNQ": "GQ", "GLP": "GP", "JPN": "JP", "GUY": "GY", "GGY": "GG", "GUF": "GF", "GEO": "GE", "GRD": "GD", "GBR": "GB", "GAB": "GA", "SLV": "SV", "GIN": "GN", "GMB": "GM", "GRL": "GL", "GIB": "GI", "GHA": "GH", "OMN": "OM", "TUN": "TN", "JOR": "JO", "HRV": "HR", "HTI": "HT", "HUN": "HU", "HKG": "HK", "HND": "HN", "HMD": "HM", "VEN": "VE", "PRI": "PR", "PSE": "PS", "PLW": "PW", "PRT": "PT", "SJM": "SJ", "PRY": "PY", "IRQ": "IQ", "PAN": "PA", "PYF": "PF", "PNG": "PG", "PER": "PE", "PAK": "PK", "PHL": "PH", "PCN": "PN", "POL": "PL", "SPM": "PM", "ZMB": "ZM", "ESH": "EH", "EST": "EE", "EGY": "EG", "ZAF": "ZA", "ECU": "EC", "ITA": "IT", "VNM": "VN", "SLB": "SB", "ETH": "ET", "SOM": "SO", "ZWE": "ZW", "SAU": "SA", "ESP": "ES", "ERI": "ER", "MNE": "ME", "MDA": "MD", "MDG": "MG", "MAF": "MF", "MAR": "MA", "MCO": "MC", "UZB": "UZ", "MMR": "MM", "MLI": "ML", "MAC": "MO", "MNG": "MN", "MHL": "MH", "MKD": "MK", "MUS": "MU", "MLT": "MT", "MWI": "MW", "MDV": "MV", "MTQ": "MQ", "MNP": "MP", "MSR": "MS", "MRT": "MR", "IMN": "IM", "UGA": "UG", "TZA": "TZ", "MYS": "MY", "MEX": "MX", "ISR": "IL", "FRA": "FR", "IOT": "IO", "SHN": "SH", "FIN": "FI", "FJI": "FJ", "FLK": "FK", "FSM": "FM", "FRO": "FO", "NIC": "NI", "NLD": "NL", "NOR": "NO", "NAM": "NA", "VUT": "VU", "NCL": "NC", "NER": "NE", "NFK": "NF", "NGA": "NG", "NZL": "NZ", "NPL": "NP", "NRU": "NR", "NIU": "NU", "COK": "CK", "XKX": "XK", "CIV": "CI", "CHE": "CH", "COL": "CO", "CHN": "CN", "CMR": "CM", "CHL": "CL", "CCK": "CC", "CAN": "CA", "COG": "CG", "CAF": "CF", "COD": "CD", "CZE": "CZ", "CYP": "CY", "CXR": "CX", "CRI": "CR", "CUW": "CW", "CPV": "CV", "CUB": "CU", "SWZ": "SZ", "SYR": "SY", "SXM": "SX", "KGZ": "KG", "KEN": "KE", "SSD": "SS", "SUR": "SR", "KIR": "KI", "KHM": "KH", "KNA": "KN", "COM": "KM", "STP": "ST", "SVK": "SK", "KOR": "KR", "SVN": "SI", "PRK": "KP", "KWT": "KW", "SEN": "SN", "SMR": "SM", "SLE": "SL", "SYC": "SC", "KAZ": "KZ", "CYM": "KY", "SGP": "SG", "SWE": "SE", "SDN": "SD", "DOM": "DO", "DMA": "DM", "DJI": "DJ", "DNK": "DK", "VGB": "VG", "DEU": "DE", "YEM": "YE", "DZA": "DZ", "USA": "US", "URY": "UY", "MYT": "YT", "UMI": "UM", "LBN": "LB", "LCA": "LC", "LAO": "LA", "TUV": "TV", "TWN": "TW", "TTO": "TT", "TUR": "TR", "LKA": "LK", "LIE": "LI", "LVA": "LV", "TON": "TO", "LTU": "LT", "LUX": "LU", "LBR": "LR", "LSO": "LS", "THA": "TH", "ATF": "TF", "TGO": "TG", "TCD": "TD", "TCA": "TC", "LBY": "LY", "VAT": "VA", "VCT": "VC", "ARE": "AE", "AND": "AD", "ATG": "AG", "AFG": "AF", "AIA": "AI", "VIR": "VI", "ISL": "IS", "IRN": "IR", "ARM": "AM", "ALB": "AL", "AGO": "AO", "ATA": "AQ", "ASM": "AS", "ARG": "AR", "AUS": "AU", "AUT": "AT", "ABW": "AW", "IND": "IN", "ALA": "AX", "AZE": "AZ", "IRL": "IE", "IDN": "ID", "UKR": "UA", "QAT": "QA", "MOZ": "MZ"}
+
+    location_types = ["country", "division", "location", "zipcode"]
+
+    @gen.coroutine
+    def get(self):
+        response = ''
+        query_location = self.get_argument("location_id", None)
+        flattened_response = []
+        results={}
+        query = {
+            "size": 1000,
+            "aggs": {
+                "sub_date_buckets": {
+                    "composite": {
+                        "size": 10000,
+                        "sources": [
+                            {"zipcode": { "terms": {"field": "zipcode"}}}
+                        ]
+                    },
+                    
+                }
+            }
+        }
+ 
+        if query_location is not None: # Global
+            query["query"] = parse_location_id_to_query(query_location)
+            admin_level = 0
+        
+        #location level
+        if len(query_location.split("_")) == 3:
+            query["aggs"]["sub_date_buckets"]["composite"]["sources"].extend([
+                {"sub_id": { "terms": {"field": "zipcode"} }},
+                {"sub": { "terms": {"field": "zipcode"} }}
+            ])
+            admin_level = "z"
+            
+        #division level
+        if len(query_location.split("_")) == 2:
+            query["aggs"]["sub_date_buckets"]["composite"]["sources"].extend([
+                {"sub_id": { "terms": {"field": "location_id"} }},
+                {"sub": { "terms": {"field": "location"} }}
+            ])
+            admin_level = 2
+        
+        #country level
+        elif len(query_location.split("_")) == 1:
+            query["aggs"]["sub_date_buckets"]["composite"]["sources"].extend([
+                {"sub_id": { "terms": {"field": "division_id"} }},
+                {"sub": { "terms": {"field": "division"} }}
+            ])
+            admin_level = 1 
+            
+        #print(query)
+        resp = yield self.asynchronous_fetch(query)
+        flattened_response.append(resp['hits']['hits'])
+                        
+        ctr = 0
+        buckets = resp["aggregations"]["sub_date_buckets"]["buckets"]
+         
+        # Get all paginated results
+        while "after_key" in resp["aggregations"]["sub_date_buckets"]:
+            query["aggs"]["sub_date_buckets"]["composite"]["after"] = resp["aggregations"]["sub_date_buckets"]["after_key"]
+            resp = yield self.asynchronous_fetch(query)
+            buckets.extend(resp["aggregations"]["sub_date_buckets"]["buckets"])
+        
+        dict_response = {}
+        
+        if len(buckets) > 0:
+            flattened_response = []
+            for i in buckets:
+               
+                if i["key"]["sub"].lower().replace("-", "").replace(" ", "") == "outofstate":
+                    i["key"]["sub"] = "Out of state"
+                if i["key"]["sub"].lower() in ["none", "unknown"]:
+                    i["key"]["sub"] = "Unknown"
+                if i['key']['zipcode'] != 'None':
+                    rec = {
+                        "zipcode": i["key"]["zipcode"],
+                        "name": i["key"]["sub"],
+                        "id": i["key"]["sub_id"],
+                        "total_count": i["doc_count"],
+                   }
+                    rec["id"] = "_".join([query_location, i["key"]["zipcode"]])
+                    flattened_response.append(rec) 
+
+        resp = {"success": True, "results": flattened_response}
+        self.write(resp)
+
+class ShapeByZipcode(BaseHandler):
+
+    # Use dict to map to NE IDs from epi data
+    country_iso3_to_iso2 = {"BGD": "BD", "BEL": "BE", "BFA": "BF", "BGR": "BG", "BIH": "BA", "BRB": "BB", "WLF": "WF", "BLM": "BL", "BMU": "BM", "BRN": "BN", "BOL": "BO", "BHR": "BH", "BDI": "BI", "BEN": "BJ", "BTN": "BT", "JAM": "JM", "BVT": "BV", "BWA": "BW", "WSM": "WS", "BES": "BQ", "BRA": "BR", "BHS": "BS", "JEY": "JE", "BLR": "BY", "BLZ": "BZ", "RUS": "RU", "RWA": "RW", "SRB": "RS", "TLS": "TL", "REU": "RE", "TKM": "TM", "TJK": "TJ", "ROU": "RO", "TKL": "TK", "GNB": "GW", "GUM": "GU", "GTM": "GT", "SGS": "GS", "GRC": "GR", "GNQ": "GQ", "GLP": "GP", "JPN": "JP", "GUY": "GY", "GGY": "GG", "GUF": "GF", "GEO": "GE", "GRD": "GD", "GBR": "GB", "GAB": "GA", "SLV": "SV", "GIN": "GN", "GMB": "GM", "GRL": "GL", "GIB": "GI", "GHA": "GH", "OMN": "OM", "TUN": "TN", "JOR": "JO", "HRV": "HR", "HTI": "HT", "HUN": "HU", "HKG": "HK", "HND": "HN", "HMD": "HM", "VEN": "VE", "PRI": "PR", "PSE": "PS", "PLW": "PW", "PRT": "PT", "SJM": "SJ", "PRY": "PY", "IRQ": "IQ", "PAN": "PA", "PYF": "PF", "PNG": "PG", "PER": "PE", "PAK": "PK", "PHL": "PH", "PCN": "PN", "POL": "PL", "SPM": "PM", "ZMB": "ZM", "ESH": "EH", "EST": "EE", "EGY": "EG", "ZAF": "ZA", "ECU": "EC", "ITA": "IT", "VNM": "VN", "SLB": "SB", "ETH": "ET", "SOM": "SO", "ZWE": "ZW", "SAU": "SA", "ESP": "ES", "ERI": "ER", "MNE": "ME", "MDA": "MD", "MDG": "MG", "MAF": "MF", "MAR": "MA", "MCO": "MC", "UZB": "UZ", "MMR": "MM", "MLI": "ML", "MAC": "MO", "MNG": "MN", "MHL": "MH", "MKD": "MK", "MUS": "MU", "MLT": "MT", "MWI": "MW", "MDV": "MV", "MTQ": "MQ", "MNP": "MP", "MSR": "MS", "MRT": "MR", "IMN": "IM", "UGA": "UG", "TZA": "TZ", "MYS": "MY", "MEX": "MX", "ISR": "IL", "FRA": "FR", "IOT": "IO", "SHN": "SH", "FIN": "FI", "FJI": "FJ", "FLK": "FK", "FSM": "FM", "FRO": "FO", "NIC": "NI", "NLD": "NL", "NOR": "NO", "NAM": "NA", "VUT": "VU", "NCL": "NC", "NER": "NE", "NFK": "NF", "NGA": "NG", "NZL": "NZ", "NPL": "NP", "NRU": "NR", "NIU": "NU", "COK": "CK", "XKX": "XK", "CIV": "CI", "CHE": "CH", "COL": "CO", "CHN": "CN", "CMR": "CM", "CHL": "CL", "CCK": "CC", "CAN": "CA", "COG": "CG", "CAF": "CF", "COD": "CD", "CZE": "CZ", "CYP": "CY", "CXR": "CX", "CRI": "CR", "CUW": "CW", "CPV": "CV", "CUB": "CU", "SWZ": "SZ", "SYR": "SY", "SXM": "SX", "KGZ": "KG", "KEN": "KE", "SSD": "SS", "SUR": "SR", "KIR": "KI", "KHM": "KH", "KNA": "KN", "COM": "KM", "STP": "ST", "SVK": "SK", "KOR": "KR", "SVN": "SI", "PRK": "KP", "KWT": "KW", "SEN": "SN", "SMR": "SM", "SLE": "SL", "SYC": "SC", "KAZ": "KZ", "CYM": "KY", "SGP": "SG", "SWE": "SE", "SDN": "SD", "DOM": "DO", "DMA": "DM", "DJI": "DJ", "DNK": "DK", "VGB": "VG", "DEU": "DE", "YEM": "YE", "DZA": "DZ", "USA": "US", "URY": "UY", "MYT": "YT", "UMI": "UM", "LBN": "LB", "LCA": "LC", "LAO": "LA", "TUV": "TV", "TWN": "TW", "TTO": "TT", "TUR": "TR", "LKA": "LK", "LIE": "LI", "LVA": "LV", "TON": "TO", "LTU": "LT", "LUX": "LU", "LBR": "LR", "LSO": "LS", "THA": "TH", "ATF": "TF", "TGO": "TG", "TCD": "TD", "TCA": "TC", "LBY": "LY", "VAT": "VA", "VCT": "VC", "ARE": "AE", "AND": "AD", "ATG": "AG", "AFG": "AF", "AIA": "AI", "VIR": "VI", "ISL": "IS", "IRN": "IR", "ARM": "AM", "ALB": "AL", "AGO": "AO", "ATA": "AQ", "ASM": "AS", "ARG": "AR", "AUS": "AU", "AUT": "AT", "ABW": "AW", "IND": "IN", "ALA": "AX", "AZE": "AZ", "IRL": "IE", "IDN": "ID", "UKR": "UA", "QAT": "QA", "MOZ": "MZ"}
+
+    @gen.coroutine
+    def get(self):
+        response = ''
+        query_location = self.get_argument("location_id", None)
+        flattened_response = []
+        results={}
+        query = {
+            "size": 1000,
+            "aggs": {
+                "sub_date_buckets": {
+                    "composite": {
+                        "size": 10000,
+                        "sources": [
+                            {"shape": { "terms": {"field": "shape"}}},
+                            {"zipcode_name": { "terms": {"field": "zipcode_name"}}}
+                        ]
+                    },
+                    
+                }
+            }
+        }
+
+    
+       
+        query["aggs"]["sub_date_buckets"]["composite"]["sources"].extend([
+            {"sub_id": { "terms": {"field": "zipcode"} }}
+        ])
+         
+        resp = yield self.asynchronous_fetch_sdzipcode(query)        
+        
+        flattened_response.append(resp['hits']['hits'])
+        #self.write(flattened_response)
+        """ 
+        ctr = 0
+        buckets = resp["aggregations"]["sub_date_buckets"]["buckets"]
+        
+        # Get all paginated results
+        while "after_key" in resp["aggregations"]["sub_date_buckets"]:
+            query["aggs"]["sub_date_buckets"]["composite"]["after"] = resp["aggregations"]["sub_date_buckets"]["after_key"]
+            resp = yield self.asynchronous_fetch_shape(query)
+            buckets.extend(resp["aggregations"]["sub_date_buckets"]["buckets"])
+        dict_response = {}
+        if len(buckets) > 0:
+            flattened_response = []
+            for i in buckets:
+               
+                print(i)
+                rec = {
+                    "zipcode_name": i["key"]["zipcode_name"],
+                    "name": i["key"]["sub"],
+                    "id": i["key"]["sub_id"],
+                    "total_count": i["doc_count"],
+                    "shape": i["key"]["shape"]
+                }
+
+
+                flattened_response.append(rec) 
+
+        """
+
+        resp = {"success": True, "results": flattened_response}
+        self.write(resp)
+        
 class Shape(BaseHandler):
 
     # Use dict to map to NE IDs from epi data
     country_iso3_to_iso2 = {"BGD": "BD", "BEL": "BE", "BFA": "BF", "BGR": "BG", "BIH": "BA", "BRB": "BB", "WLF": "WF", "BLM": "BL", "BMU": "BM", "BRN": "BN", "BOL": "BO", "BHR": "BH", "BDI": "BI", "BEN": "BJ", "BTN": "BT", "JAM": "JM", "BVT": "BV", "BWA": "BW", "WSM": "WS", "BES": "BQ", "BRA": "BR", "BHS": "BS", "JEY": "JE", "BLR": "BY", "BLZ": "BZ", "RUS": "RU", "RWA": "RW", "SRB": "RS", "TLS": "TL", "REU": "RE", "TKM": "TM", "TJK": "TJ", "ROU": "RO", "TKL": "TK", "GNB": "GW", "GUM": "GU", "GTM": "GT", "SGS": "GS", "GRC": "GR", "GNQ": "GQ", "GLP": "GP", "JPN": "JP", "GUY": "GY", "GGY": "GG", "GUF": "GF", "GEO": "GE", "GRD": "GD", "GBR": "GB", "GAB": "GA", "SLV": "SV", "GIN": "GN", "GMB": "GM", "GRL": "GL", "GIB": "GI", "GHA": "GH", "OMN": "OM", "TUN": "TN", "JOR": "JO", "HRV": "HR", "HTI": "HT", "HUN": "HU", "HKG": "HK", "HND": "HN", "HMD": "HM", "VEN": "VE", "PRI": "PR", "PSE": "PS", "PLW": "PW", "PRT": "PT", "SJM": "SJ", "PRY": "PY", "IRQ": "IQ", "PAN": "PA", "PYF": "PF", "PNG": "PG", "PER": "PE", "PAK": "PK", "PHL": "PH", "PCN": "PN", "POL": "PL", "SPM": "PM", "ZMB": "ZM", "ESH": "EH", "EST": "EE", "EGY": "EG", "ZAF": "ZA", "ECU": "EC", "ITA": "IT", "VNM": "VN", "SLB": "SB", "ETH": "ET", "SOM": "SO", "ZWE": "ZW", "SAU": "SA", "ESP": "ES", "ERI": "ER", "MNE": "ME", "MDA": "MD", "MDG": "MG", "MAF": "MF", "MAR": "MA", "MCO": "MC", "UZB": "UZ", "MMR": "MM", "MLI": "ML", "MAC": "MO", "MNG": "MN", "MHL": "MH", "MKD": "MK", "MUS": "MU", "MLT": "MT", "MWI": "MW", "MDV": "MV", "MTQ": "MQ", "MNP": "MP", "MSR": "MS", "MRT": "MR", "IMN": "IM", "UGA": "UG", "TZA": "TZ", "MYS": "MY", "MEX": "MX", "ISR": "IL", "FRA": "FR", "IOT": "IO", "SHN": "SH", "FIN": "FI", "FJI": "FJ", "FLK": "FK", "FSM": "FM", "FRO": "FO", "NIC": "NI", "NLD": "NL", "NOR": "NO", "NAM": "NA", "VUT": "VU", "NCL": "NC", "NER": "NE", "NFK": "NF", "NGA": "NG", "NZL": "NZ", "NPL": "NP", "NRU": "NR", "NIU": "NU", "COK": "CK", "XKX": "XK", "CIV": "CI", "CHE": "CH", "COL": "CO", "CHN": "CN", "CMR": "CM", "CHL": "CL", "CCK": "CC", "CAN": "CA", "COG": "CG", "CAF": "CF", "COD": "CD", "CZE": "CZ", "CYP": "CY", "CXR": "CX", "CRI": "CR", "CUW": "CW", "CPV": "CV", "CUB": "CU", "SWZ": "SZ", "SYR": "SY", "SXM": "SX", "KGZ": "KG", "KEN": "KE", "SSD": "SS", "SUR": "SR", "KIR": "KI", "KHM": "KH", "KNA": "KN", "COM": "KM", "STP": "ST", "SVK": "SK", "KOR": "KR", "SVN": "SI", "PRK": "KP", "KWT": "KW", "SEN": "SN", "SMR": "SM", "SLE": "SL", "SYC": "SC", "KAZ": "KZ", "CYM": "KY", "SGP": "SG", "SWE": "SE", "SDN": "SD", "DOM": "DO", "DMA": "DM", "DJI": "DJ", "DNK": "DK", "VGB": "VG", "DEU": "DE", "YEM": "YE", "DZA": "DZ", "USA": "US", "URY": "UY", "MYT": "YT", "UMI": "UM", "LBN": "LB", "LCA": "LC", "LAO": "LA", "TUV": "TV", "TWN": "TW", "TTO": "TT", "TUR": "TR", "LKA": "LK", "LIE": "LI", "LVA": "LV", "TON": "TO", "LTU": "LT", "LUX": "LU", "LBR": "LR", "LSO": "LS", "THA": "TH", "ATF": "TF", "TGO": "TG", "TCD": "TD", "TCA": "TC", "LBY": "LY", "VAT": "VA", "VCT": "VC", "ARE": "AE", "AND": "AD", "ATG": "AG", "AFG": "AF", "AIA": "AI", "VIR": "VI", "ISL": "IS", "IRN": "IR", "ARM": "AM", "ALB": "AL", "AGO": "AO", "ATA": "AQ", "ASM": "AS", "ARG": "AR", "AUS": "AU", "AUT": "AT", "ABW": "AW", "IND": "IN", "ALA": "AX", "AZE": "AZ", "IRL": "IE", "IDN": "ID", "UKR": "UA", "QAT": "QA", "MOZ": "MZ"}
 
-    location_types = ["country", "division", "location"]
+    location_types = ["country", "division", "location", "zipcode"]
 
     @gen.coroutine
     def get(self):
@@ -273,7 +458,15 @@ class Shape(BaseHandler):
         if query_location is not None: # Global
             query["query"] = parse_location_id_to_query(query_location)
             admin_level = 0
-
+        
+        #location level
+        if len(query_location.split("_")) == 3:
+            query["aggs"]["sub_date_buckets"]["composite"]["sources"].extend([
+                {"sub_id": { "terms": {"field": "zipcode"} }}
+            ])
+            admin_level = "z"
+ 
+        #division level
         if len(query_location.split("_")) == 2:
             query["aggs"]["sub_date_buckets"]["composite"]["sources"].extend([
                 {"sub_id": { "terms": {"field": "location_id"} }},
@@ -281,6 +474,7 @@ class Shape(BaseHandler):
             ])
             admin_level = 2
         
+        #country level
         elif len(query_location.split("_")) == 1:
             query["aggs"]["sub_date_buckets"]["composite"]["sources"].extend([
                 {"sub_id": { "terms": {"field": "division_id"} }},
@@ -290,15 +484,13 @@ class Shape(BaseHandler):
          
         resp = yield self.asynchronous_fetch_shape(query)
         flattened_response.append(resp['hits']['hits'])
-
+        
         ctr = 0
         buckets = resp["aggregations"]["sub_date_buckets"]["buckets"]
         # Get all paginated results
         while "after_key" in resp["aggregations"]["sub_date_buckets"]:
-            print('ere')
             query["aggs"]["sub_date_buckets"]["composite"]["after"] = resp["aggregations"]["sub_date_buckets"]["after_key"]
             resp = yield self.asynchronous_fetch_shape(query)
-            #print(resp)
             buckets.extend(resp["aggregations"]["sub_date_buckets"]["buckets"])
         dict_response = {}
         if len(buckets) > 0:
@@ -323,6 +515,9 @@ class Shape(BaseHandler):
                     rec["id"] = "_".join([query_location, self.country_iso3_to_iso2[query_location]+"-"+i["key"]["sub_id"] if query_location in self.country_iso3_to_iso2 else query_location + "-" + i["key"]["sub_id"]])
                 elif admin_level == 2:
                     rec["id"] = "_".join([query_location, i["key"]["sub_id"]])
+                elif admin_level == "z":
+                    rec["id"] = "_".join([query_location, i["key"]["sub_id"]])
+ 
                 flattened_response.append(rec) 
 
 
@@ -343,6 +538,7 @@ class LocationHandler(BaseHandler):
         query_str = self.get_argument("name", None)
         flattened_response = []
         for loc in self.location_types:
+            #if we aren't looking at a zipcode and we have a string
             if loc != 'zipcode':
                 query = {
                     "size": 0,
@@ -365,7 +561,7 @@ class LocationHandler(BaseHandler):
                         }
                     }
                 }
-            else:
+            elif loc == 'zipcode':
                 query = {
                     "size": 0,
                     "query": {
@@ -409,10 +605,9 @@ class LocationHandler(BaseHandler):
                     {"location_id": { "terms": {"field": "location_id"}}},
  
                 ])
-            print(query) 
-            resp = yield self.asynchronous_fetch(query)
-            print(resp, "RESP")            
-        
+            
+            resp = yield self.asynchronous_fetch(query) 
+            
             if loc =="country":
                 for rec in resp["aggregations"]["loc_agg"]["buckets"]:
                     flattened_response.append({
@@ -470,7 +665,7 @@ class LocationHandler(BaseHandler):
                         "zipcode" : rec["key"]["zipcode"],
                         "id": "_".join([rec["key"]["country_id"], country_iso2_code + "-" + rec["key"]["division_id"], rec["key"]["location_id"], rec["key"]["zipcode"]]),
                         "label": ", ".join([rec["key"]["zipcode"], rec["key"]["location"], rec["key"]["division"], rec["key"]["country"]]),
-                        "admin_level": 2,
+                        "admin_level": "z",
                         "total_count": rec["doc_count"]
                     })
         

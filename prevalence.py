@@ -154,10 +154,21 @@ class CumulativePrevalenceByLocationHandler(BaseHandler):
                     {"sub": { "terms": {"field": "division"} }}
                 ])
                 admin_level = 1
+            
+            #include the location
+            elif len(query_location.split("_")) == 3:
+                query["aggs"]["sub_date_buckets"]["composite"]["sources"].extend([
+                    {"sub_id": { "terms": {"field": "zipcode"} }},
+                    {"sub": { "terms": {"field": "zipcode"}}},
+                ])
+                admin_level = "z"
+ 
+            
             query_lineages = query_lineage.split(" OR ") if query_lineage is not None else []
             query_obj = create_nested_mutation_query(lineages = query_lineages, mutations = query_mutation)
             query["aggs"]["sub_date_buckets"]["aggregations"]["lineage_count"]["filter"] = query_obj
             resp = yield self.asynchronous_fetch(query)
+            
             ctr = 0
             buckets = resp["aggregations"]["sub_date_buckets"]["buckets"]
             # Get all paginated results
@@ -168,6 +179,7 @@ class CumulativePrevalenceByLocationHandler(BaseHandler):
             dict_response = {}
             if len(buckets) > 0:
                 flattened_response = []
+                
                 for i in buckets:
                     if len(i["key"]["date_collected"].split("-")) < 3 or "XX" in i["key"]["date_collected"]:
                         continue
@@ -188,6 +200,9 @@ class CumulativePrevalenceByLocationHandler(BaseHandler):
                         rec["id"] = "_".join([query_location, self.country_iso3_to_iso2[query_location]+"-"+i["key"]["sub_id"] if query_location in self.country_iso3_to_iso2 else query_location + "-" + i["key"]["sub_id"]])
                     elif admin_level == 2:
                         rec["id"] = "_".join([query_location, i["key"]["sub_id"]])
+                    elif admin_level == "z":
+                        rec["id"] = "_".join([query_location, i["key"]["sub_id"]])
+
                     flattened_response.append(rec)
                 dict_response = transform_prevalence_by_location_and_tiime(flattened_response, query_ndays, query_detected)
             res_key = None
