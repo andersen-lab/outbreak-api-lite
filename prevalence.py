@@ -167,6 +167,7 @@ class CumulativePrevalenceByLocationHandler(BaseHandler):
             query_lineages = query_lineage.split(" OR ") if query_lineage is not None else []
             query_obj = create_nested_mutation_query(lineages = query_lineages, mutations = query_mutation)
             query["aggs"]["sub_date_buckets"]["aggregations"]["lineage_count"]["filter"] = query_obj
+            print(query)
             resp = yield self.asynchronous_fetch(query)
             
             ctr = 0
@@ -183,12 +184,12 @@ class CumulativePrevalenceByLocationHandler(BaseHandler):
                 for i in buckets:
                     if len(i["key"]["date_collected"].split("-")) < 3 or "XX" in i["key"]["date_collected"]:
                         continue
-                    # Check for None and out of state
-                   
+                    # Check for None and out of state                   
                     if i["key"]["sub"].lower().replace("-", "").replace(" ", "") == "outofstate":
                         i["key"]["sub"] = "Out of state"
                     if i["key"]["sub"].lower() in ["none", "unknown"]:
                         i["key"]["sub"] = "Unknown"
+                    
                     rec = {
                         "date": i["key"]["date_collected"],
                         "name": i["key"]["sub"],
@@ -201,11 +202,13 @@ class CumulativePrevalenceByLocationHandler(BaseHandler):
                     elif admin_level == 2:
                         rec["id"] = "_".join([query_location, i["key"]["sub_id"]])
                     elif admin_level == "z":
-                        rec["id"] = "_".join([query_location, i["key"]["sub_id"]])
-
+                        if i['key']['sub_id'] != "None":
+                           rec["id"] = i["key"]["sub_id"]
+                    
                     flattened_response.append(rec)
                 dict_response = transform_prevalence_by_location_and_tiime(flattened_response, query_ndays, query_detected)
             res_key = None
+            
             if query_lineage is not None: # create_iterator will never return empty list for lineages
                 res_key = " OR ".join(query_lineages)
             if len(query_mutations) > 0:

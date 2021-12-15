@@ -228,8 +228,8 @@ def parse_location_id_to_query(query_id, query_obj = None):
                 "must": []
             }
         }
-    location_types = ["country_id", "division_id", "location_id"]
-    for i in range(min(3, len(location_codes))):
+    location_types = ["country_id", "division_id", "location_id", "zipcode"]
+    for i in range(min(4, len(location_codes))):
         if i == 1 and len(location_codes[i].split("-")) > 1:              # For division remove iso2 code if present
             location_codes[i] = location_codes[i].split("-")[1]
         if "must" in query_obj["bool"]:

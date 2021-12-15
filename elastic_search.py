@@ -99,14 +99,14 @@ def simplify_gpk_zipcode():
         goejson_temp={}
         geojson_temp['geometry'] = shapely.geometry.mapping(s)
         new_dict['shape'] = json.dumps(geojson_temp,separators=(',', ':'))
-        print(total_bytes, total_coordinates)           
+        #print(total_bytes, total_coordinates)           
         yield new_dict
      
 def simplify_gpkg():
     location = './shapefiles'
     all_shp_files = os.listdir(location)
     all_shp_files = [os.path.join(location,filename) for filename in all_shp_files if filename.endswith(".shp")]
-    print(all_shp_files)
+    #print(all_shp_files)
 
     from shapely.geometry import shape as sh
     import shapely
@@ -336,12 +336,18 @@ def generate_actions(data, region_df):
         new_dict['date_submitted'] = str(row['date_submitted'])
         new_dict['date_collected'] = str(row['date_collected'])
         new_dict['date_modified'] = str(row['date_modified'])
-        new_dict['zipcode'] = str(row['zipcode'])
+
         if str(row['zipcode']).isdigit() and int(row['zipcode']) > 0:
-            new_dict['region'] = region_df.loc[region_df['ZIP'] == int(row['zipcode'])]['Region']
+       
+            if 91901 <= int(row['zipcode'])  <= 92199:
+                new_dict['zipcode'] = str(row['zipcode'])
+                new_dict['region'] = region_df.loc[region_df['ZIP'] == int(row['zipcode'])]['Region']
+            else:
+                new_dict['zipcode'] = 'None'
+                new_dict['region'] = "None"
         else:
             new_dict['region'] = "None"
-        
+            new_dict['zipcode'] = "None"
         temp_list = []
          
         if row['mutations'] != None:
@@ -399,7 +405,7 @@ def main():
     ):
         progress.update(1)
         successes += ok
-    sys.exit(0) 
+    
     print("Indexed %d/%d documents", successes, 123)
     
     create_polygon(client)

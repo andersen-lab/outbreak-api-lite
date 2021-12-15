@@ -12,8 +12,12 @@ class SequenceCountHandler(BaseHandler):
         query_location = self.get_argument("location_id", None)
         query_cumulative = self.get_argument("cumulative", None)
         query_subadmin = self.get_argument("subadmin", None)
+        query_return_loc = self.get_argument("return_loc", None)
         query_subadmin = True if query_subadmin == "true" else False
         query_cumulative = True if query_cumulative == "true" else False
+        query_return_loc = True if query_return_loc == 'true' else False
+        
+
         query = {}
         if query_location is not None:
             query["query"] = parse_location_id_to_query(query_location)
@@ -32,13 +36,43 @@ class SequenceCountHandler(BaseHandler):
             buckets = resp
             for i in path_to_results:
                 buckets = buckets[i]
+           
             flattened_response = [{
                 "date": i["key"],
                 "total_count": i["doc_count"]
             } for i in buckets if not (len(i["key"].split("-")) < 3 or "XX" in i["key"])]
             flattened_response = sorted(flattened_response, key = lambda x: x["date"])
         else:
-            if query_subadmin:
+            if query_return_loc:
+                query["aggs"] = {
+                    "date": {
+                        "multi_terms": {
+                         "terms": [{
+                            "field": "country_id" 
+                            }, {
+                            "field": "division_id"
+                            }, {
+                            "field": "location_id"
+                            }, {
+                            "field": "country"},
+                            {"field":"division"},
+                            {"field":"location"}]
+                        }
+                    }
+                }               
+                resp = yield self.asynchronous_fetch(query)
+                path_to_results = ["aggregations", "date", "buckets"]
+                buckets = resp
+                for i in path_to_results:
+                    buckets = buckets[i]
+                print(buckets) 
+                flattened_response = [{
+                    "loc_code": i["key"],
+                    "total_count": i["doc_count"]
+                } for i in buckets]
+                flattened_response = sorted(flattened_response, key = lambda x: x["total_count"])
+                   
+            elif query_subadmin:
                 subadmin = None
                 if query_location is None:
                     subadmin = "country_id"
@@ -72,7 +106,6 @@ class SequenceCountHandler(BaseHandler):
                 } for i in resp["aggregations"]["subadmin"]["buckets"] if i["key"].lower() != "none"]
                 flattened_response = sorted(flattened_response, key = lambda x: -x["total_count"])
             else:
-                
                 res = yield self.asynchronous_fetch_count(query)
                 size = res['count']
                 """ 
