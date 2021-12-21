@@ -7,8 +7,8 @@ from prevalence import GlobalPrevalenceByTimeHandler, PrevalenceByLocationAndTim
 from general import LocationHandler, LocationDetailsHandler, MetadataHandler, MutationHandler, SubmissionLagHandler, SequenceCountHandler, MostRecentSubmissionDateHandler, MostRecentCollectionDateHandler, GisaidIDHandler
 
 
-es = AsyncElasticsearch('http://localhost:9200')
-na = Elasticsearch('http://localhost:9200')
+es = AsyncElasticsearch(hosts=[{'host': 'es'}], retry_on_timeout=True)
+na = Elasticsearch(hosts=[{'host': 'es'}], retry_on_timeout=True)
 if __name__ == "__main__":
     application = tornado.web.Application([
         (r"/shape/shape", Shape, dict(db=es, db2=na)),

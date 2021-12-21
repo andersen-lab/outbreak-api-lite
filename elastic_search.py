@@ -2,6 +2,10 @@ import os
 import io
 import sys
 import json
+import argparse
+from shapely.geometry import shape as sh
+import shapely
+import shapefile
 import tqdm
 import urllib3
 import requests
@@ -9,7 +13,8 @@ import zipfile
 import pandas as pd
 from elasticsearch import Elasticsearch
 from elasticsearch.helpers import streaming_bulk
-
+from shapely.geometry import shape as sh
+from shapely.geometry import GeometryCollection
 
 def get_gpkg(countries):
     """
@@ -29,10 +34,6 @@ def get_gpkg(countries):
 def simplify_gpk_zipcode():
     location = './Census_ZIP.geojson'
     
-    from shapely.geometry import shape as sh
-    from shapely.geometry import GeometryCollection
-    import shapely
-    import shapefile
     count=0
     import ast
     doc=''
@@ -108,9 +109,6 @@ def simplify_gpkg():
     all_shp_files = [os.path.join(location,filename) for filename in all_shp_files if filename.endswith(".shp")]
     #print(all_shp_files)
 
-    from shapely.geometry import shape as sh
-    import shapely
-    import shapefile
     count=0
     for shp in all_shp_files:
         shape = shapefile.Reader(shp)
@@ -381,10 +379,29 @@ def generate_actions(data, region_df):
         yield new_dict
 
 def main():
-    json_filename = 'new_api_data.json'
-    print("Loading dataset...")
-    data = download_dataset(json_filename)
+    """
+    Script takes in a json file containing metadata processed
+    according to https://github.com/andersen-lab/bjorn and ingests
+    it into an elastic search database.
     
+    Parameters
+    ----------
+    json_filename : str
+        Path to the metadata file.
+    """
+    
+    #tutorial on how to connect this to docker es
+    #https://github.com/davidefiocco/dockerized-elasticsearch-indexer
+    
+    #parse out args
+    parser = argparse.ArgumentParser(description='Bulk elasticsearch ingest.')
+    parser.add_argument('-j','--json', help='Full path to json metadata.', required=True)
+    args = parser.parse_args()
+   
+    json_filename = args.json
+    
+    data = download_dataset(json_filename)
+    print(len(data)) 
     unique_countries = []
     unique_divisions = []
     for item in data:
@@ -393,8 +410,8 @@ def main():
         if item['division_id'] not in unique_divisions:
             unique_divisions.append(item['division_id'])
     #get_gpkg(unique_countries) 
-    client = Elasticsearch()
-    
+    client = Elasticsearch(hosts=[{'host': 'es'}], retry_on_timeout=True)
+    print(client) 
     create_zipcode(client)
     print("Indexing shapes...")
     progress = tqdm.tqdm(unit="docs", total=123)
