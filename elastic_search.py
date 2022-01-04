@@ -1,6 +1,7 @@
 import os
 import io
 import sys
+import ast
 import json
 import argparse
 from shapely.geometry import shape as sh
@@ -31,23 +32,22 @@ def get_gpkg(countries):
         #find and delete all non shape files
         #os.system("find ./shapefiles -type f  ! -name '*.shp'  -delete")
 
-def simplify_gpk_zipcode():
-    location = './Census_ZIP.geojson'
-    
+def simplify_gpk_zipcode(location):   
     count=0
     import ast
     doc=''
+    print(location)
     with open(location, "r") as gjson:
         for line in gjson:
             doc += line.strip()
-    
+   
     geojson_list = ast.literal_eval(doc)['features']
     for c,feature in enumerate(geojson_list): 
         new_dict = {}
         geojson_temp = { "type": "Feature"}
-        
-        zipcode = feature['properties']['ZIP']
-        zipcode_name = feature['properties']['COMMUNITY']
+        print("OY", feature.keys())
+        zipcode = feature['properties']['zip']
+        zipcode_name = feature['properties']['community']
         from collections.abc import Iterable
         def flatten(l):
             for el in l:
@@ -100,7 +100,7 @@ def simplify_gpk_zipcode():
         goejson_temp={}
         geojson_temp['geometry'] = shapely.geometry.mapping(s)
         new_dict['shape'] = json.dumps(geojson_temp,separators=(',', ':'))
-        #print(total_bytes, total_coordinates)           
+         
         yield new_dict
      
 def simplify_gpkg():
@@ -310,7 +310,7 @@ def create_index(client):
         ignore=400,)
 
 
-def generate_actions(data, region_df):
+def generate_actions(data, region_df=None):
     test_mut_count = 0
     for i,row in enumerate(data):
         new_dict = {}
@@ -339,7 +339,8 @@ def generate_actions(data, region_df):
        
             if 91901 <= int(row['zipcode'])  <= 92199:
                 new_dict['zipcode'] = str(row['zipcode'])
-                new_dict['region'] = region_df.loc[region_df['ZIP'] == int(row['zipcode'])]['Region']
+                if region_df != None:
+                    new_dict['region'] = region_df.loc[region_df['ZIP'] == int(row['zipcode'])]['Region']
             else:
                 new_dict['zipcode'] = 'None'
                 new_dict['region'] = "None"
@@ -396,12 +397,13 @@ def main():
     #parse out args
     parser = argparse.ArgumentParser(description='Bulk elasticsearch ingest.')
     parser.add_argument('-j','--json', help='Full path to json metadata.', required=True)
+    parser.add_argument('-z','--zipcode', help='Full path to config file.', required=False)
     args = parser.parse_args()
-   
-    json_filename = args.json
     
+    zipcodes = args.zipcode
+    json_filename = args.json
     data = download_dataset(json_filename)
-    print(len(data)) 
+    
     unique_countries = []
     unique_divisions = []
     for item in data:
@@ -409,16 +411,16 @@ def main():
             unique_countries.append(item['country_id'])
         if item['division_id'] not in unique_divisions:
             unique_divisions.append(item['division_id'])
-    #get_gpkg(unique_countries) 
+    get_gpkg(unique_countries) 
     client = Elasticsearch(hosts=[{'host': 'es'}], retry_on_timeout=True)
-    print(client) 
+    
     create_zipcode(client)
     print("Indexing shapes...")
     progress = tqdm.tqdm(unit="docs", total=123)
     successes = 0
     
     for ok, action in streaming_bulk(
-        client=client, index="sdzipcode", actions=simplify_gpk_zipcode(),
+        client=client, index="sdzipcode", actions=simplify_gpk_zipcode(zipcodes),
     ):
         progress.update(1)
         successes += ok
@@ -428,7 +430,7 @@ def main():
     create_polygon(client)
      
     #open the reigion-zipcode df
-    region_df = pd.read_csv("SanDiegoZIP_region.csv")
+    #region_df = pd.read_csv("SanDiegoZIP_region.csv")
     
     print("Indexing shapes...")
     progress = tqdm.tqdm(unit="docs", total=5342)
@@ -449,7 +451,7 @@ def main():
     progress = tqdm.tqdm(unit="docs", total=len(data))
     successes = 0
     for ok, action in streaming_bulk(
-        client=client, index="hcov19", actions=generate_actions(data, region_df),
+        client=client, index="hcov19", actions=generate_actions(data),
     ):
         progress.update(1)
         successes += ok
