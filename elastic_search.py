@@ -413,7 +413,7 @@ def main():
             unique_divisions.append(item['division_id'])
     get_gpkg(unique_countries) 
     client = Elasticsearch(hosts=[{'host': 'es'}], retry_on_timeout=True)
-    
+    #client = Elasticsearch(hosts=[{"host": "host.docker.internal", "port": 9200}], retry_on_timeout=True)
     create_zipcode(client)
     print("Indexing shapes...")
     progress = tqdm.tqdm(unit="docs", total=123)
