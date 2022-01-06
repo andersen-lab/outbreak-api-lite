@@ -36,7 +36,7 @@ def simplify_gpk_zipcode(location):
     count=0
     import ast
     doc=''
-    print(location)
+    
     with open(location, "r") as gjson:
         for line in gjson:
             doc += line.strip()
@@ -398,10 +398,13 @@ def main():
     parser = argparse.ArgumentParser(description='Bulk elasticsearch ingest.')
     parser.add_argument('-j','--json', help='Full path to json metadata.', required=True)
     parser.add_argument('-z','--zipcode', help='Full path to config file.', required=False)
+    parser.add_argument('--hostname', nargs="?",const="es",help='Hostname in case not being run via docker.', required=False)
+    
     args = parser.parse_args()
     
     zipcodes = args.zipcode
     json_filename = args.json
+    hostname = args.hostname
     data = download_dataset(json_filename)
     
     unique_countries = []
@@ -411,22 +414,24 @@ def main():
             unique_countries.append(item['country_id'])
         if item['division_id'] not in unique_divisions:
             unique_divisions.append(item['division_id'])
-    get_gpkg(unique_countries) 
-    client = Elasticsearch(hosts=[{'host': 'es'}], retry_on_timeout=True)
-    #client = Elasticsearch(hosts=[{"host": "host.docker.internal", "port": 9200}], retry_on_timeout=True)
-    create_zipcode(client)
-    print("Indexing shapes...")
-    progress = tqdm.tqdm(unit="docs", total=123)
-    successes = 0
-    
-    for ok, action in streaming_bulk(
-        client=client, index="sdzipcode", actions=simplify_gpk_zipcode(zipcodes),
-    ):
-        progress.update(1)
-        successes += ok
-    
-    print("Indexed %d/%d documents", successes, 123)
-    
+    get_gpkg(unique_countries)
+    client = Elasticsearch(hosts=[{'host': '%s' %hostname}], retry_on_timeout=True)
+   
+    #if we have a zipcode file provided we process it
+    if zipcodes is not None: 
+        create_zipcode(client)
+        print("Indexing shapes...")
+        progress = tqdm.tqdm(unit="docs", total=123)
+        successes = 0
+        
+        for ok, action in streaming_bulk(
+            client=client, index="sdzipcode", actions=simplify_gpk_zipcode(zipcodes),
+        ):
+            progress.update(1)
+            successes += ok
+        
+        print("Indexed %d/%d documents", successes, 123)
+        
     create_polygon(client)
      
     #open the reigion-zipcode df

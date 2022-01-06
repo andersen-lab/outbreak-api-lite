@@ -1,3 +1,4 @@
+import argparse
 import tornado.ioloop
 import tornado.web
 from general import LocationHandler, Shape, Zipcode, ShapeByZipcode
@@ -6,9 +7,13 @@ from lineage import LineageByCountryHandler, LineageByDivisionHandler, LineageAn
 from prevalence import GlobalPrevalenceByTimeHandler, PrevalenceByLocationAndTimeHandler, CumulativePrevalenceByLocationHandler, PrevalenceAllLineagesByLocationHandler, PrevalenceByAAPositionHandler
 from general import LocationHandler, LocationDetailsHandler, MetadataHandler, MutationHandler, SubmissionLagHandler, SequenceCountHandler, MostRecentSubmissionDateHandler, MostRecentCollectionDateHandler, GisaidIDHandler
 
+parser = argparse.ArgumentParser(description='Start tornado server.')
+parser.add_argument('--hostname', nargs="?",const="es",help='Hostname in case not being run via docker.', required=False)
+args = parser.parse_args()
+hostname = args.hostname
 
-es = AsyncElasticsearch(hosts=[{'host': 'es'}], retry_on_timeout=True)
-na = Elasticsearch(hosts=[{'host': 'es'}], retry_on_timeout=True)
+es = AsyncElasticsearch(hosts=[{'host': '%s' %hostname}], retry_on_timeout=True)
+na = Elasticsearch(hosts=[{'host': '%s' %hostname}], retry_on_timeout=True)
 if __name__ == "__main__":
     application = tornado.web.Application([
         (r"/shape/shape", Shape, dict(db=es, db2=na)),
