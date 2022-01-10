@@ -793,11 +793,29 @@ class SubmissionLagHandler(BaseHandler):
 class MetadataHandler(BaseHandler):
     @gen.coroutine
     def get(self):
-        mapping = yield self.get_mapping()
-        mapping = mapping["hcov19"]["mappings"]
-        res = None
-        if "mutation" in mapping:
-            res = mapping['mutation']['_meta']
-        else:
-            res = mapping["_meta"]
+        query = {
+        "size": 1,
+        "query": {
+          "function_score": {
+             "functions": [
+                {
+                   "random_score": {
+                      "seed": "1477072619038"
+                   }
+                }
+              ]
+           }
+         }
+        }
+        resp = yield self.asynchronous_fetch(query)
+        res = {"lastUpdated" :resp['hits']['hits'][0]["_source"]["@timestamp"]}
+        
+        #mapping = yield self.get_mapping()
+        #mapping = mapping["hcov19"]["mappings"]
+        #print('MAP',mapping)
+        #res = None
+        #if "mutation" in mapping:
+        #    res = mapping['mutation']
+        #else:
+        #    res = mapping
         self.write(res)

@@ -6,6 +6,7 @@ import json
 import argparse
 from shapely.geometry import shape as sh
 import shapely
+import datetime
 import shapefile
 import tqdm
 import urllib3
@@ -313,7 +314,10 @@ def create_index(client):
 def generate_actions(data, region_df=None):
     test_mut_count = 0
     for i,row in enumerate(data):
+        currentDT = datetime.datetime.now()
+        #print(currentDT)
         new_dict = {}
+        new_dict['@timestamp'] = currentDT.strftime("%Y-%m-%dT%H:%M:%SZ")
         new_dict['_id'] = i
         new_dict['strain'] = row['strain']
         new_dict['country'] = str(row['country'])
@@ -405,6 +409,7 @@ def main():
     zipcodes = args.zipcode
     json_filename = args.json
     hostname = args.hostname
+    print(json_filename)
     data = download_dataset(json_filename)
     
     unique_countries = []
