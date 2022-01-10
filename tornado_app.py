@@ -17,7 +17,7 @@ na = Elasticsearch(hosts=[{'host': '%s' %hostname}], retry_on_timeout=True)
 if __name__ == "__main__":
     application = tornado.web.Application([
         (r"/shape/shape", Shape, dict(db=es, db2=na)),
-        (r"/sdzipcode/shape", ShapeByZipcode, dict(db=es,db2=na)),
+        (r"/zipcodes/shape", ShapeByZipcode, dict(db=es,db2=na)),
         (r"/hcov19/get-zipcodes", Zipcode, dict(db=es, db2=na)),
         (r"/hcov19/location", LocationHandler, dict(db=es,db2=na)),
         (r"/hcov19/lineage-by-country", LineageByCountryHandler, dict(db=es,db2=na)),
