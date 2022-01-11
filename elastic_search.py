@@ -196,7 +196,7 @@ def download_dataset(json_filename):
 
 def create_zipcode(client):
     client.indices.create(
-        index="sdzipcode",
+        index="zipcodes",
         body={
             "settings": {"number_of_shards": 100,
                 "analysis": {
@@ -402,6 +402,7 @@ def main():
     parser = argparse.ArgumentParser(description='Bulk elasticsearch ingest.')
     parser.add_argument('-j','--json', help='Full path to json metadata.', required=True)
     parser.add_argument('-z','--zipcode', help='Full path to config file.', required=False)
+    parser.add_arguemnt('-c', '--config', help="Full path to config file.", required=False)
     parser.add_argument('--hostname', nargs="?",const="es",help='Hostname in case not being run via docker.', required=False)
     
     args = parser.parse_args()
@@ -409,7 +410,7 @@ def main():
     zipcodes = args.zipcode
     json_filename = args.json
     hostname = args.hostname
-    print(json_filename)
+    config_filename = args.config
     data = download_dataset(json_filename)
     
     unique_countries = []
@@ -422,6 +423,15 @@ def main():
     get_gpkg(unique_countries)
     client = Elasticsearch(hosts=[{'host': '%s' %hostname}], retry_on_timeout=True)
    
+    #check for a config file
+    if zipcodes is None:
+        with open(config_filename,'r') as json_file:
+            config = json.load(json_file)
+            param = config['pathToZipcodes']
+            if os.path.isfile(param):
+                zipcodes = param
+
+
     #if we have a zipcode file provided we process it
     if zipcodes is not None: 
         create_zipcode(client)
@@ -430,7 +440,7 @@ def main():
         successes = 0
         
         for ok, action in streaming_bulk(
-            client=client, index="sdzipcode", actions=simplify_gpk_zipcode(zipcodes),
+            client=client, index="zipcodes", actions=simplify_gpk_zipcode(zipcodes),
         ):
             progress.update(1)
             successes += ok
