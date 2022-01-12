@@ -18,6 +18,21 @@ from elasticsearch.helpers import streaming_bulk
 from shapely.geometry import shape as sh
 from shapely.geometry import GeometryCollection
 
+def create_snapshot(es):
+    snapshot_body = {
+    "type": "fs",
+    "settings": {
+            "location": "/home/chrissy/backup"
+        }
+    }
+    index_body = {
+    "indices": "hcov19,zipcodes,shape"
+    }
+    es.snapshot.create_repository(repository='backup', body=snapshot_body)
+    index_body = {
+    "indices": "shape,zipcodes,hcov19"
+    }
+    es.snapshot.create(repository='backup', snapshot='test_snapshot', body=index_body)
 def get_gpkg(countries):
     """
     Parameters
@@ -402,7 +417,7 @@ def main():
     parser = argparse.ArgumentParser(description='Bulk elasticsearch ingest.')
     parser.add_argument('-j','--json', help='Full path to json metadata.', required=True)
     parser.add_argument('-z','--zipcode', help='Full path to config file.', required=False)
-    parser.add_arguemnt('-c', '--config', help="Full path to config file.", required=False)
+    parser.add_argument('-c', '--config', help="Full path to config file.", required=False)
     parser.add_argument('--hostname', nargs="?",const="es",help='Hostname in case not being run via docker.', required=False)
     
     args = parser.parse_args()
@@ -477,7 +492,7 @@ def main():
         successes += ok
     
     print("Indexed %d/%d documents" % (successes, len(data)))
-
+    create_snapshot(client)
 
 if __name__ == "__main__":
     main()

@@ -15,7 +15,7 @@ class BaseHandler(tornado.web.RequestHandler):
         self.es = db
         self.na = db2
     async def asynchronous_fetch_sdzipcode(self, query):
-        response = await self.es.search(index='sdzipcode', body=query)
+        response = await self.es.search(index='zipcodes', body=query)
         return response
 
 
