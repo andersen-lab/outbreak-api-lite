@@ -426,6 +426,7 @@ def main():
     json_filename = args.json
     hostname = args.hostname
     config_filename = args.config
+    print(json_filename)
     data = download_dataset(json_filename)
     
     unique_countries = []
@@ -485,8 +486,8 @@ def main():
     print("Indexing documents...")
     progress = tqdm.tqdm(unit="docs", total=len(data))
     successes = 0
-    for ok, action in streaming_bulk(
-        client=client, index="hcov19", actions=generate_actions(data),
+    for ok, action in parallel_bulk(
+        client=client, index="hcov19", actions=generate_actions(data), thread_count=20
     ):
         progress.update(1)
         successes += ok
