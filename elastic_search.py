@@ -22,7 +22,7 @@ def create_snapshot(es):
     snapshot_body = {
     "type": "fs",
     "settings": {
-            "location": "/home/chrissy/backup"
+            "location": "backup"
         }
     }
     index_body = {
@@ -438,7 +438,7 @@ def main():
             unique_divisions.append(item['division_id'])
     get_gpkg(unique_countries)
     client = Elasticsearch(hosts=[{'host': '%s' %hostname}], retry_on_timeout=True)
-   
+      
     #check for a config file
     if zipcodes is None:
         with open(config_filename,'r') as json_file:
@@ -447,7 +447,7 @@ def main():
             if os.path.isfile(param):
                 zipcodes = param
 
-
+    
     #if we have a zipcode file provided we process it
     if zipcodes is not None: 
         create_zipcode(client)
@@ -491,9 +491,10 @@ def main():
     ):
         progress.update(1)
         successes += ok
-    
+     
     print("Indexed %d/%d documents" % (successes, len(data)))
-    create_snapshot(client)
+    if config['esSnapshot'] == 'True':
+        create_snapshot(client)
 
 if __name__ == "__main__":
     main()
