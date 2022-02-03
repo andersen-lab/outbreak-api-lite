@@ -1,10 +1,12 @@
+"""
+Script parallel ingests data into ElasticSearch database.
+"""
 import os
 import io
 import sys
 import ast
 import json
 import argparse
-from shapely.geometry import shape as sh
 import shapely
 import datetime
 import shapefile
@@ -13,11 +15,87 @@ import urllib3
 import requests
 import zipfile
 import pandas as pd
+import numpy as np
+from collections.abc import Iterable
 from elasticsearch import Elasticsearch
-from elasticsearch.helpers import streaming_bulk
+from elasticsearch.helpers import streaming_bulk, parallel_bulk
 from shapely.geometry import shape as sh
 from shapely.geometry import GeometryCollection
 
+countries = []
+
+def test_epi_availability(epi_location, zipcodes):
+    """
+    Given a zipcode epi filepath or url, determine whether 
+    (1) the resource exists
+    (2) if it matches the geojson data available for the zipcode
+    
+    If both conditions are met, return the loaded file.
+    
+    Parameters
+    ----------
+    epi_location : str
+        The url or filepath to json epi data by zipcode.
+    zipcodes : str
+        The filepath to the zipcode geojson.
+    
+    Returns
+    -------
+    epi_data : dict
+        The epi data by zipcode.
+    """
+    print("Testing the availability of epi data")
+    #if the resource exists
+    have_resource = False  
+    #if the zipcode match out geojson data  
+    correct_zipcodes = False    
+    epi_data = {}
+
+    #figure out if we have epi data
+    #try and get url epi
+    response = requests.get(epi_location)
+    if response.status_code == 200:
+        have_resource = True
+        resource_load = response.json()
+
+    #if its not a url try and find it locally
+    else:
+        if os.path.isfile(epi_location):
+            #make sure we can open it
+            try:
+                with open(epi_location, 'r') as jsonfile:
+                    resource_load = json.load(jsonfile)
+                have_resource = True
+
+            except:
+                print("loading epi data failed: data file isn't in json format.")
+
+    #if we have epi data make sure it's correct
+    if have_resource:
+        #now we load the zipcode data for comparison
+        geojson_zipcodes = []
+        with open(zipcodes, "r") as jsonfile:
+            zip_data = json.load(jsonfile)
+            for zd in zip_data["features"]:
+                geojson_zipcodes.append(zd["properties"]["zip"])
+        for location_data in resource_load["features"]:
+            temp_zip = str(location_data["attributes"]["zipcode_zip"])
+            #we have this zipcode geojson data
+            if temp_zip in geojson_zipcodes: 
+                case_count = location_data["attributes"]["case_count"]
+                case_rate = location_data["attributes"]["rate_100k"]
+                update_date = location_data["attributes"]["updatedate"]
+                
+                epi_data[temp_zip] = {"case_count":case_count, "rate_100k":case_rate, \
+                    "updatedate":update_date}
+        if len(epi_data) > 0:
+            return(epi_data)
+        else:
+            return(None)
+    #we don't have epi data
+    else:
+        return(None)
+    
 def create_snapshot(es):
     snapshot_body = {
     "type": "fs",
@@ -33,14 +111,15 @@ def create_snapshot(es):
     "indices": "shape,zipcodes,hcov19"
     }
     es.snapshot.create(repository='backup', snapshot='test_snapshot', body=index_body)
-def get_gpkg(countries):
+
+def get_gpkg(ucountries):
     """
     Parameters
     ----------
     country : str
         The name of the country to download information for.
     """
-    for country in countries:
+    for country in ucountries:
         print(country)
         response = requests.get('https://biogeo.ucdavis.edu/data/gadm3.6/shp/gadm36_%s_shp.zip' %country)
         z = zipfile.ZipFile(io.BytesIO(response.content))
@@ -48,29 +127,39 @@ def get_gpkg(countries):
         #find and delete all non shape files
         #os.system("find ./shapefiles -type f  ! -name '*.shp'  -delete")
 
-def simplify_gpk_zipcode(location):   
+def simplify_gpk_zipcode(location, epi_data=None):
+    """
+    Generator function for adding zipcode related data to ElasticSearch.
+
+    Parameters
+    ----------
+    location : str
+        Path to zipcode geojson.
+    epi_data : dict, Opt.
+        Dictionary with epi data per zipcode.
+    """   
+
     count=0
-    import ast
     doc=''
     
     with open(location, "r") as gjson:
         for line in gjson:
             doc += line.strip()
-   
     geojson_list = ast.literal_eval(doc)['features']
+
     for c,feature in enumerate(geojson_list): 
         new_dict = {}
         geojson_temp = { "type": "Feature"}
-        print("OY", feature.keys())
         zipcode = feature['properties']['zip']
         zipcode_name = feature['properties']['community']
-        from collections.abc import Iterable
+      
         def flatten(l):
             for el in l:
                 if isinstance(el, Iterable) and not isinstance(el, (str, bytes)):
                     yield from flatten(el)
                 else:
                     yield el
+        
         def recursive_len(item):
             if type(item) == list:
                 return sum(recursive_len(subitem) for subitem in item)
@@ -113,18 +202,26 @@ def simplify_gpk_zipcode(location):
         count += 1
         new_dict['zipcode'] = zipcode
         new_dict['zipcode_name'] = zipcode_name
-        goejson_temp={}
+        geojson_temp={}
         geojson_temp['geometry'] = shapely.geometry.mapping(s)
         new_dict['shape'] = json.dumps(geojson_temp,separators=(',', ':'))
-         
+        
+        #add epi data if applicable
+        if epi_data is not None:
+            new_dict['case_count'] = epi_data[zipcode]["case_count"]
+            new_dict['updatedate'] = epi_data[zipcode]["updatedate"]
+            new_dict['rate_100k'] = epi_data[zipcode]["rate_100k"]     
+        else:       
+            new_dict['case_count'] = "None"
+            new_dict['updatedate'] = "None"
+            new_dict['rate_100k'] = "None"
+        
         yield new_dict
      
 def simplify_gpkg():
     location = './shapefiles'
     all_shp_files = os.listdir(location)
     all_shp_files = [os.path.join(location,filename) for filename in all_shp_files if filename.endswith(".shp")]
-    #print(all_shp_files)
-
     count=0
     for shp in all_shp_files:
         shape = shapefile.Reader(shp)
@@ -132,7 +229,6 @@ def simplify_gpkg():
             new_dict = {}
             geojson = { "type": "Feature"}
              
-            #print(feature.record, shp) 
             country=feature.record[1]
             try:
                 if '1' in shp or '2' in shp:
@@ -202,13 +298,6 @@ def simplify_gpkg():
             yield new_dict
 
 
-def download_dataset(json_filename):
-    data = []
-    with open(json_filename,'r') as jfile:
-        for line in jfile:
-            data.append(json.loads(line))
-    return(data)
-
 def create_zipcode(client):
     client.indices.create(
         index="zipcodes",
@@ -269,7 +358,7 @@ def create_index(client):
     client.indices.create(
         index="hcov19",
         body={
-            "settings": {"number_of_shards": 100,
+            "settings": {"number_of_shards": 1000,
                 "analysis": {
                     "normalizer": {
                         "keyword_lowercase": {
@@ -326,77 +415,78 @@ def create_index(client):
         ignore=400,)
 
 
-def generate_actions(data, region_df=None):
+def generate_actions(json_filename, region_df=None):
     test_mut_count = 0
-    for i,row in enumerate(data):
-        currentDT = datetime.datetime.now()
-        #print(currentDT)
-        new_dict = {}
-        new_dict['@timestamp'] = currentDT.strftime("%Y-%m-%dT%H:%M:%SZ")
-        new_dict['_id'] = i
-        new_dict['strain'] = row['strain']
-        new_dict['country'] = str(row['country'])
-        new_dict['country_id'] = str(row['country_id'])
-        new_dict['country_lower'] = str(row['country_lower'])
-        new_dict['division'] = str(row['division'])
-        new_dict['division_id'] = str(row['division_id'])
-        new_dict['division_lower'] = str(row['division_lower'])
-        new_dict['location'] = str(row['location'])
-        new_dict['location_id'] = str(row['location_id'])
-        new_dict['location_lower'] = str(row['location_lower'])
-        new_dict['accession_id'] = str(row['accession_id'])
-        new_dict['pangolin_lineage'] = str(row['pangolin_lineage'])
-        if 'pango_version' in row:
-            new_dict['pango_version'] = str(row['pango_version'])
-        if 'clade' in row:
-            new_dict['clade'] = str(row['clade'])
-        new_dict['date_submitted'] = str(row['date_submitted'])
-        new_dict['date_collected'] = str(row['date_collected'])
-        new_dict['date_modified'] = str(row['date_modified'])
-
-        if str(row['zipcode']).isdigit() and int(row['zipcode']) > 0:
-       
-            if 91901 <= int(row['zipcode'])  <= 92199:
-                new_dict['zipcode'] = str(row['zipcode'])
-                if region_df != None:
-                    new_dict['region'] = region_df.loc[region_df['ZIP'] == int(row['zipcode'])]['Region']
+   
+    with open(json_filename,'r') as jfile:
+        for i, line in enumerate(jfile):
+            row = json.loads(line)
+            currentDT = datetime.datetime.now()
+            new_dict = {}
+            new_dict['@timestamp'] = currentDT.strftime("%Y-%m-%dT%H:%M:%SZ")
+            #new_dict['_id'] = i
+            new_dict['strain'] = row['strain']
+            new_dict['country'] = str(row['country'])
+            if str(row['country']) not in countries:
+                countries.append(str(row['country_id']))
+            new_dict['country_id'] = str(row['country_id'])
+            new_dict['country_lower'] = str(row['country_lower'])
+            new_dict['division'] = str(row['division'])
+            new_dict['division_id'] = str(row['division_id'])
+            new_dict['division_lower'] = str(row['division_lower'])
+            new_dict['location'] = str(row['location'])
+            new_dict['location_id'] = str(row['location_id'])
+            new_dict['location_lower'] = str(row['location_lower'])
+            new_dict['accession_id'] = str(row['accession_id'])
+            new_dict['pangolin_lineage'] = str(row['pangolin_lineage'])
+            if 'pango_version' in row:
+                new_dict['pango_version'] = str(row['pango_version'])
+            if 'clade' in row:
+                new_dict['clade'] = str(row['clade'])
+            new_dict['date_submitted'] = str(row['date_submitted'])
+            new_dict['date_collected'] = str(row['date_collected'])
+            new_dict['date_modified'] = str(row['date_modified'])
+            if 'zipcode' in row:
+                if str(row['zipcode']).isdigit() and int(row['zipcode']) > 0:     
+                    new_dict['zipcode'] = str(row['zipcode'])
+                    if region_df != None:
+                        new_dict['region'] = region_df.loc[region_df['ZIP'] == int(row['zipcode'])]['Region']
+                else:
+                    new_dict['zipcode'] = 'None'
+                    new_dict['region'] = "None"
             else:
-                new_dict['zipcode'] = 'None'
                 new_dict['region'] = "None"
-        else:
-            new_dict['region'] = "None"
-            new_dict['zipcode'] = "None"
-        temp_list = []
-         
-        if row['mutations'] != None:
-            for mut in row['mutations']:
-                temp = {}
-                temp['mutation'] = mut['mutation']
-                temp['type'] = mut['type']
-                temp['gene'] = mut['gene']     
-                temp['ref_codon'] = mut['ref_codon']
-                temp['pos'] = mut['pos']
-                if 'alt_codon' in mut:
-                    temp['alt_codon'] = mut['alt_codon']
-                temp['is_synonymous'] = mut['is_synonymous']
-                if 'ref_aa' in mut:
-                    temp['ref_aa'] = mut['ref_aa']
-                temp['codon_num'] = mut['codon_num']
-                if 'alt_aa' in mut:
-                    temp['alt_aa'] = mut['alt_aa']
-                if 'absolute_coords' in mut:
-                    temp['absolute_coords'] = mut['absolute_coords']
-                if 'change_length_nt' in mut:
-                    temp['change_length_nt'] = mut['change_length_nt']
-                if 'nt_map_coords' in mut:
-                    temp['nt_map_coords'] = mut['nt_map_coords']
-                if 'aa_map_coords'  in mut:
-                    temp['aa_map_coords'] = mut['aa_map_coords']
-                temp_list.append(temp) 
-        #print(temp_list)
-        new_dict['mutations'] = temp_list
-        #print(test_mut_count)    
-        yield new_dict
+                new_dict['zipcode'] = "None"
+            temp_list = []
+             
+            if row['mutations'] != None:
+                for mut in row['mutations']:
+                    temp = {}
+                    temp['mutation'] = mut['mutation']
+                    temp['type'] = mut['type']
+                    temp['gene'] = mut['gene']     
+                    temp['ref_codon'] = mut['ref_codon']
+                    temp['pos'] = mut['pos']
+                    if 'alt_codon' in mut:
+                        temp['alt_codon'] = mut['alt_codon']
+                    temp['is_synonymous'] = mut['is_synonymous']
+                    if 'ref_aa' in mut:
+                        temp['ref_aa'] = mut['ref_aa']
+                    temp['codon_num'] = mut['codon_num']
+                    if 'alt_aa' in mut:
+                        temp['alt_aa'] = mut['alt_aa']
+                    if 'absolute_coords' in mut:
+                        temp['absolute_coords'] = mut['absolute_coords']
+                    if 'change_length_nt' in mut:
+                        temp['change_length_nt'] = mut['change_length_nt']
+                    if 'nt_map_coords' in mut:
+                        temp['nt_map_coords'] = mut['nt_map_coords']
+                    if 'aa_map_coords'  in mut:
+                        temp['aa_map_coords'] = mut['aa_map_coords']
+                    temp_list.append(temp) 
+           
+            new_dict['mutations'] = temp_list
+            yield new_dict
 
 def main():
     """
@@ -406,8 +496,14 @@ def main():
     
     Parameters
     ----------
-    json_filename : str
+    json : str
         Path to the metadata file.
+    zipcode :str
+        Path to the file with zipcode geojson data.
+    config : str
+        Path to the config file.
+    hostname : str
+        The host address.
     """
     
     #tutorial on how to connect this to docker es
@@ -426,49 +522,66 @@ def main():
     json_filename = args.json
     hostname = args.hostname
     config_filename = args.config
-    print(json_filename)
-    data = download_dataset(json_filename)
+    print("Hostname ", hostname)
+    print("Zipcodes ", zipcodes)
     
-    unique_countries = []
-    unique_divisions = []
-    for item in data:
-        if item['country_id'] not in unique_countries and item['country_id'] != 'None':
-            unique_countries.append(item['country_id'])
-        if item['division_id'] not in unique_divisions:
-            unique_divisions.append(item['division_id'])
-    get_gpkg(unique_countries)
-    client = Elasticsearch(hosts=[{'host': '%s' %hostname}], retry_on_timeout=True)
-      
-    #check for a config file
+    client = Elasticsearch(hosts=[{'host': '%s' %hostname}], retry_on_timeout=True, maxsize=25)
+    
+    #default epi data to None
+    epi_data = None
+
+    #check for a zipcode config file and epi information
     if zipcodes is None:
         with open(config_filename,'r') as json_file:
             config = json.load(json_file)
             param = config['pathToZipcodes']
+            #make sure the file exists          
             if os.path.isfile(param):
                 zipcodes = param
-
-    
+                   
+            #only bother with epi if we have the geojson for zipcodes
+            if zipcodes is not None:    
+                epi_location = config['zipcodeEpi']
+                
+                #make sure we can access the epi data and it matches our geojson
+                epi_data = test_epi_availability(epi_location, zipcodes)
+            
     #if we have a zipcode file provided we process it
     if zipcodes is not None: 
         create_zipcode(client)
-        print("Indexing shapes...")
         progress = tqdm.tqdm(unit="docs", total=123)
         successes = 0
-        
+            
         for ok, action in streaming_bulk(
-            client=client, index="zipcodes", actions=simplify_gpk_zipcode(zipcodes),
+            client=client, index="zipcodes", actions=simplify_gpk_zipcode(zipcodes, epi_data),
         ):
             progress.update(1)
             successes += ok
         
         print("Indexed %d/%d documents", successes, 123)
-        
-    create_polygon(client)
-     
-    #open the reigion-zipcode df
-    #region_df = pd.read_csv("SanDiegoZIP_region.csv")
     
-    print("Indexing shapes...")
+    create_index(client)
+    client.indices.put_settings(index="hcov19", body={
+    "index.refresh_interval": "1s",
+    })    
+    
+    #parallel bulk
+    progress = tqdm.tqdm(unit="docs", total=5000000)
+    successes = 0
+    for ok, action in parallel_bulk(
+        client=client, index="hcov19", actions=generate_actions(json_filename), thread_count=8, chunk_size=5000,\
+        queue_size=5
+    ):  
+        progress.update(1)
+        if ok:
+            successes += ok
+   
+    create_polygon(client)
+    
+    #handle geojson shapes not related to zipcode
+    unique_countries = np.unique(countries)   
+    get_gpkg(unique_countries)
+    
     progress = tqdm.tqdm(unit="docs", total=5342)
     successes = 0
     
@@ -478,21 +591,7 @@ def main():
         progress.update(1)
         successes += ok
         
-    print("Indexed %d/%d documents" % (successes, 5342))
- 
-    print("Creating an index...")
-    create_index(client)
-
-    print("Indexing documents...")
-    progress = tqdm.tqdm(unit="docs", total=len(data))
-    successes = 0
-    for ok, action in parallel_bulk(
-        client=client, index="hcov19", actions=generate_actions(data), thread_count=20
-    ):
-        progress.update(1)
-        successes += ok
      
-    print("Indexed %d/%d documents" % (successes, len(data)))
     if config['esSnapshot'] == 'True':
         create_snapshot(client)
 
