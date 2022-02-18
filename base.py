@@ -6,6 +6,7 @@ class BaseHandler(tornado.web.RequestHandler):
     def set_default_headers(self):
         self.set_header("Content-Type", "application/json")
         self.set_header("Access-Control-Allow-Origin", "*")
+        self.set_header("Access-Control-Allow-Headers", "x-requested-with")
         self.set_header("Access-Control-Allow-Headers", "content-type,Authorization")
         self.set_header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS, PATCH, PUT')
 
@@ -18,6 +19,9 @@ class BaseHandler(tornado.web.RequestHandler):
         response = await self.es.search(index='zipcodes', body=query)
         return response
 
+    async def asynchronous_fetch_epi(self, query):
+        response = await self.es.search(index='epi', body=query)
+        return response
 
     async def asynchronous_fetch_shape(self, query):
         response = await self.es.search(index='shape', body=query)

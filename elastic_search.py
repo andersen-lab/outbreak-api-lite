@@ -41,15 +41,15 @@ def test_epi_availability(epi_location, zipcodes):
     
     Returns
     -------
-    epi_data : dict
-        The epi data by zipcode.
+    epi_data : list
+        The epi data.
     """
     print("Testing the availability of epi data")
     #if the resource exists
     have_resource = False  
     #if the zipcode match out geojson data  
     correct_zipcodes = False    
-    epi_data = {}
+    epi_data = []
 
     #figure out if we have epi data
     #try and get url epi
@@ -69,7 +69,7 @@ def test_epi_availability(epi_location, zipcodes):
 
             except:
                 print("loading epi data failed: data file isn't in json format.")
-
+ 
     #if we have epi data make sure it's correct
     if have_resource:
         #now we load the zipcode data for comparison
@@ -78,16 +78,25 @@ def test_epi_availability(epi_location, zipcodes):
             zip_data = json.load(jsonfile)
             for zd in zip_data["features"]:
                 geojson_zipcodes.append(zd["properties"]["zip"])
-        for location_data in resource_load["features"]:
-            temp_zip = str(location_data["attributes"]["zipcode_zip"])
+        
+        
+        #iterate all epi data
+        for location_data in resource_load["features"]:  
+            temp_zip = str(location_data["attributes"]["zip_code"])
             #we have this zipcode geojson data
             if temp_zip in geojson_zipcodes: 
-                case_count = location_data["attributes"]["case_count"]
-                case_rate = location_data["attributes"]["rate_100k"]
-                update_date = location_data["attributes"]["updatedate"]
-                
-                epi_data[temp_zip] = {"case_count":case_count, "rate_100k":case_rate, \
-                    "updatedate":update_date}
+                total_case_count = location_data["attributes"]["total_cases"]
+                new_case_rate = location_data["attributes"]["new_cases_in_7_day_case_rate"]
+                if new_case_rate is None:
+                    continue
+                average_case_rate = location_data["attributes"]["f7_day_average_case_rate"]
+                if average_case_rate is None:
+                    continue
+                dates = location_data["attributes"]["current_date_range"]              
+                epi_data.append({"total_cases":str(total_case_count), "f7_day_average_case_rate":str(average_case_rate), \
+                    "new_cases_in_7_day_case_rate":str(new_case_rate), "current_date_range":str(dates), "zipcode":str(temp_zip)})
+            
+                                    
         if len(epi_data) > 0:
             return(epi_data)
         else:
@@ -95,7 +104,7 @@ def test_epi_availability(epi_location, zipcodes):
     #we don't have epi data
     else:
         return(None)
-    
+
 def create_snapshot(es):
     snapshot_body = {
     "type": "fs",
@@ -108,24 +117,26 @@ def create_snapshot(es):
     }
     es.snapshot.create_repository(repository='backup', body=snapshot_body)
     index_body = {
-    "indices": "shape,zipcodes,hcov19"
+    "indices": "shape,zipcodes,hcov19,epi"
     }
     es.snapshot.create(repository='backup', snapshot='test_snapshot', body=index_body)
 
 def get_gpkg(ucountries):
     """
+    Download the geojson files for all countries contained within the dataset.
+
     Parameters
     ----------
     country : str
         The name of the country to download information for.
     """
-    for country in ucountries:
-        print(country)
+    for country in ucountries: 
         response = requests.get('https://biogeo.ucdavis.edu/data/gadm3.6/shp/gadm36_%s_shp.zip' %country)
-        z = zipfile.ZipFile(io.BytesIO(response.content))
-        z.extractall("./shapefiles/")
-        #find and delete all non shape files
-        #os.system("find ./shapefiles -type f  ! -name '*.shp'  -delete")
+        if response.status_code == 200:
+            z = zipfile.ZipFile(io.BytesIO(response.content))
+            z.extractall("./shapefiles/")
+        else:
+            print("Unable to get geojson data for %s" %country)
 
 def simplify_gpk_zipcode(location, epi_data=None):
     """
@@ -206,16 +217,7 @@ def simplify_gpk_zipcode(location, epi_data=None):
         geojson_temp['geometry'] = shapely.geometry.mapping(s)
         new_dict['shape'] = json.dumps(geojson_temp,separators=(',', ':'))
         
-        #add epi data if applicable
-        if epi_data is not None:
-            new_dict['case_count'] = epi_data[zipcode]["case_count"]
-            new_dict['updatedate'] = epi_data[zipcode]["updatedate"]
-            new_dict['rate_100k'] = epi_data[zipcode]["rate_100k"]     
-        else:       
-            new_dict['case_count'] = "None"
-            new_dict['updatedate'] = "None"
-            new_dict['rate_100k'] = "None"
-        
+       
         yield new_dict
      
 def simplify_gpkg():
@@ -317,17 +319,52 @@ def create_zipcode(client):
                 "zipcode" : {"type":"keyword"},
                 "zipcode_name" : {"type":"keyword"},
                 "shape": {"type": "keyword"},
+               },
+            },
+        },
+        ignore=400,)
+
+def create_epi(client):
+    """
+    Creates the ES index for the epi data.
+    
+    Parameters
+    ----------
+    client :
+        ElasticSearch client.
+    """
+    client.indices.create(
+        index="epi",
+        body={
+            "settings": {"number_of_shards": 10,
+                "analysis": {
+                    "normalizer": {
+                        "keyword_lowercase": {
+                        "type": "custom",
+                        "filter": ["lowercase"]
+                        }
+                    }
+                }
+            },             
+            "mappings": {
+            "properties": {
+                "zipcode" : {"type":"keyword"},
+                "total_cases" : {"type": "keyword"},
+                "new_cases_in_7_day_case_rate" : {"type": "keyword"},
+                "current_date_range" : {"type": "keyword"},
+                "f7_day_average_case_rate" : {"type": "keyword"}
                 },
             },
         },
         ignore=400,)
 
 
+
 def create_polygon(client):
     client.indices.create(
         index="shape",
         body={
-            "settings": {"number_of_shards": 100,
+            "settings": {"number_of_shards": 10,
                 "analysis": {
                     "normalizer": {
                         "keyword_lowercase": {
@@ -358,7 +395,7 @@ def create_index(client):
     client.indices.create(
         index="hcov19",
         body={
-            "settings": {"number_of_shards": 1000,
+            "settings": {"number_of_shards": 10,
                 "analysis": {
                     "normalizer": {
                         "keyword_lowercase": {
@@ -488,6 +525,18 @@ def generate_actions(json_filename, region_df=None):
             new_dict['mutations'] = temp_list
             yield new_dict
 
+def generate_epi_index(epi_data):
+    for epi in epi_data:
+        new_dict = {}
+        new_dict["zipcode"] = str(epi["zipcode"])
+        new_dict["total_cases"]=str(epi["total_cases"])
+        new_dict["new_cases_in_7_day_case_rate"] = str(epi["new_cases_in_7_day_case_rate"])
+        new_dict["current_date_range"] = str(epi["current_date_range"])
+        new_dict["f7_day_average_case_rate"]=str(epi["f7_day_average_case_rate"])
+        print(new_dict)
+        yield(new_dict)
+
+
 def main():
     """
     Script takes in a json file containing metadata processed
@@ -530,7 +579,7 @@ def main():
     #default epi data to None
     epi_data = None
 
-    #check for a zipcode config file and epi information
+        #check for a zipcode config file and epi information
     if zipcodes is None:
         with open(config_filename,'r') as json_file:
             config = json.load(json_file)
@@ -546,19 +595,33 @@ def main():
                 #make sure we can access the epi data and it matches our geojson
                 epi_data = test_epi_availability(epi_location, zipcodes)
             
-    #if we have a zipcode file provided we process it
-    if zipcodes is not None: 
-        create_zipcode(client)
+    if epi_data is not None:
+        create_epi(client)
         progress = tqdm.tqdm(unit="docs", total=123)
         successes = 0
             
         for ok, action in streaming_bulk(
-            client=client, index="zipcodes", actions=simplify_gpk_zipcode(zipcodes, epi_data),
+            client=client, index="epi", actions=generate_epi_index(epi_data),
         ):
             progress.update(1)
             successes += ok
         
         print("Indexed %d/%d documents", successes, 123)
+ 
+         
+    #if we have a zipcode file provided we process it
+    if zipcodes is not None: 
+        create_zipcode(client)
+        progress = tqdm.tqdm(unit="docs", total=500)
+        successes = 0
+            
+        for ok, action in streaming_bulk(
+            client=client, index="zipcodes", actions=simplify_gpk_zipcode(zipcodes),
+        ):
+            progress.update(1)
+            successes += ok
+        
+        print("Indexed %d/%d documents", successes, 500)
     
     create_index(client)
     client.indices.put_settings(index="hcov19", body={

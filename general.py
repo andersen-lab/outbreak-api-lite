@@ -391,6 +391,77 @@ class Zipcode(BaseHandler):
         resp = {"success": True, "results": flattened_response}
         self.write(resp)
 
+class CaseCounts(BaseHandler):
+
+    @gen.coroutine
+    def get(self):
+        query_location = self.get_argument("current_date_range", None)
+        response = ''
+        flattened_response = []
+        results={}
+        query = {
+            "size": 1000,
+            "aggs": {
+                "sub_date_buckets": {
+                    "composite": {
+                        "size": 10000,
+                        "sources": [
+                            {"current_date_range": { "terms": {"field": "current_date_range"}}}
+                        ]
+                    },
+                    
+                }
+            }
+        }
+        if query_location is not None:        
+            query["query"] = {
+                "bool" : {
+                    "must": [{"term": {"current_date_range":query_location}}]
+                 }
+            }          
+             
+        query["aggs"]["sub_date_buckets"]["composite"]["sources"].extend([
+            {"sub_id": { "terms": {"field": "current_date_range"} }}
+        ])
+       
+        resp = yield self.asynchronous_fetch_epi(query)        
+        
+        buckets = resp['hits']['hits']
+        for i in buckets:
+            flattened_response.append(i["_source"])
+        
+        """
+        ctr = 0
+        buckets = resp["aggregations"]["sub_date_buckets"]["buckets"]
+              
+        # Get all paginated results
+        while "after_key" in resp["aggregations"]["sub_date_buckets"]:
+            query["aggs"]["sub_date_buckets"]["composite"]["after"] = resp["aggregations"]["sub_date_buckets"]["after_key"]
+            resp = yield self.asynchronous_fetch_shape(query)
+            buckets.extend(resp["aggregations"]["sub_date_buckets"]["buckets"])
+        
+        dict_response = {}
+        if len(buckets) > 0:
+            flattened_response = []
+            for i in buckets:
+               
+                print(i)
+                rec = {
+                    "zipcode_name": i["key"]["zipcode_name"],
+                    "name": i["key"]["sub"],
+                    "id": i["key"]["sub_id"],
+                    "total_count": i["doc_count"],
+                    "case_count": i["key"]["case_count"]
+                }
+
+
+                flattened_response.append(rec) 
+
+       
+        """
+        resp = {"success": True, "results": flattened_response}
+        self.write(resp)
+ 
 class ShapeByZipcode(BaseHandler):
 
     # Use dict to map to NE IDs from epi data
