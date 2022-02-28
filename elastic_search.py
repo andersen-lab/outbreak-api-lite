@@ -1,5 +1,5 @@
 """
-Script parallel ingests data into ElasticSearch database.
+Script ingests data into an ElasticSearch database.
 """
 import os
 import io
@@ -15,14 +15,10 @@ import urllib3
 import requests
 import zipfile
 import pandas as pd
-import numpy as np
-from collections.abc import Iterable
 from elasticsearch import Elasticsearch
 from elasticsearch.helpers import streaming_bulk, parallel_bulk
 from shapely.geometry import shape as sh
 from shapely.geometry import GeometryCollection
-
-countries = []
 
 def test_epi_availability(epi_location, zipcodes):
     """
@@ -109,7 +105,7 @@ def create_snapshot(es):
     snapshot_body = {
     "type": "fs",
     "settings": {
-            "location": "backup"
+            "location": "/home/chrissy/backup"
         }
     }
     index_body = {
@@ -117,60 +113,47 @@ def create_snapshot(es):
     }
     es.snapshot.create_repository(repository='backup', body=snapshot_body)
     index_body = {
-    "indices": "shape,zipcodes,hcov19,epi"
+    "indices": "shape,zipcodes,hcov19"
     }
     es.snapshot.create(repository='backup', snapshot='test_snapshot', body=index_body)
-
-def get_gpkg(ucountries):
+def get_gpkg(countries):
     """
-    Download the geojson files for all countries contained within the dataset.
-
     Parameters
     ----------
     country : str
         The name of the country to download information for.
     """
-    for country in ucountries: 
+    for country in countries:
+        print(country)
         response = requests.get('https://biogeo.ucdavis.edu/data/gadm3.6/shp/gadm36_%s_shp.zip' %country)
-        if response.status_code == 200:
-            z = zipfile.ZipFile(io.BytesIO(response.content))
-            z.extractall("./shapefiles/")
-        else:
-            print("Unable to get geojson data for %s" %country)
+        z = zipfile.ZipFile(io.BytesIO(response.content))
+        z.extractall("./shapefiles/")
+        #find and delete all non shape files
+        #os.system("find ./shapefiles -type f  ! -name '*.shp'  -delete")
 
-def simplify_gpk_zipcode(location, epi_data=None):
-    """
-    Generator function for adding zipcode related data to ElasticSearch.
-
-    Parameters
-    ----------
-    location : str
-        Path to zipcode geojson.
-    epi_data : dict, Opt.
-        Dictionary with epi data per zipcode.
-    """   
-
+def simplify_gpk_zipcode(location):   
     count=0
+    import ast
     doc=''
     
     with open(location, "r") as gjson:
         for line in gjson:
             doc += line.strip()
+   
     geojson_list = ast.literal_eval(doc)['features']
-
     for c,feature in enumerate(geojson_list): 
         new_dict = {}
         geojson_temp = { "type": "Feature"}
+        print("OY", feature.keys())
         zipcode = feature['properties']['zip']
         zipcode_name = feature['properties']['community']
-      
+        from collections.abc import Iterable
         def flatten(l):
             for el in l:
                 if isinstance(el, Iterable) and not isinstance(el, (str, bytes)):
                     yield from flatten(el)
                 else:
                     yield el
-        
         def recursive_len(item):
             if type(item) == list:
                 return sum(recursive_len(subitem) for subitem in item)
@@ -213,17 +196,18 @@ def simplify_gpk_zipcode(location, epi_data=None):
         count += 1
         new_dict['zipcode'] = zipcode
         new_dict['zipcode_name'] = zipcode_name
-        geojson_temp={}
+        goejson_temp={}
         geojson_temp['geometry'] = shapely.geometry.mapping(s)
         new_dict['shape'] = json.dumps(geojson_temp,separators=(',', ':'))
-        
-       
+         
         yield new_dict
      
 def simplify_gpkg():
     location = './shapefiles'
     all_shp_files = os.listdir(location)
     all_shp_files = [os.path.join(location,filename) for filename in all_shp_files if filename.endswith(".shp")]
+    #print(all_shp_files)
+
     count=0
     for shp in all_shp_files:
         shape = shapefile.Reader(shp)
@@ -231,6 +215,7 @@ def simplify_gpkg():
             new_dict = {}
             geojson = { "type": "Feature"}
              
+            #print(feature.record, shp) 
             country=feature.record[1]
             try:
                 if '1' in shp or '2' in shp:
@@ -300,6 +285,13 @@ def simplify_gpkg():
             yield new_dict
 
 
+def download_dataset(json_filename):
+    data = []
+    with open(json_filename,'r') as jfile:
+        for line in jfile:
+            data.append(json.loads(line))
+    return(data)
+
 def create_zipcode(client):
     client.indices.create(
         index="zipcodes",
@@ -319,52 +311,17 @@ def create_zipcode(client):
                 "zipcode" : {"type":"keyword"},
                 "zipcode_name" : {"type":"keyword"},
                 "shape": {"type": "keyword"},
-               },
-            },
-        },
-        ignore=400,)
-
-def create_epi(client):
-    """
-    Creates the ES index for the epi data.
-    
-    Parameters
-    ----------
-    client :
-        ElasticSearch client.
-    """
-    client.indices.create(
-        index="epi",
-        body={
-            "settings": {"number_of_shards": 10,
-                "analysis": {
-                    "normalizer": {
-                        "keyword_lowercase": {
-                        "type": "custom",
-                        "filter": ["lowercase"]
-                        }
-                    }
-                }
-            },             
-            "mappings": {
-            "properties": {
-                "zipcode" : {"type":"keyword"},
-                "total_cases" : {"type": "keyword"},
-                "new_cases_in_7_day_case_rate" : {"type": "keyword"},
-                "current_date_range" : {"type": "keyword"},
-                "f7_day_average_case_rate" : {"type": "keyword"}
                 },
             },
         },
         ignore=400,)
 
 
-
 def create_polygon(client):
     client.indices.create(
         index="shape",
         body={
-            "settings": {"number_of_shards": 10,
+            "settings": {"number_of_shards": 100,
                 "analysis": {
                     "normalizer": {
                         "keyword_lowercase": {
@@ -395,7 +352,7 @@ def create_index(client):
     client.indices.create(
         index="hcov19",
         body={
-            "settings": {"number_of_shards": 10,
+            "settings": {"number_of_shards": 100,
                 "analysis": {
                     "normalizer": {
                         "keyword_lowercase": {
@@ -452,20 +409,26 @@ def create_index(client):
         ignore=400,)
 
 
-def generate_actions(json_filename, region_df=None):
+def generate_actions(json_filename):
+    """
+    Takes in jsonl file and iterates, yielding dict that's ingestable by
+    ElasticSearch.
+
+    Parameters
+    ----------
+    json_filename : str
+        Full path to the json file containing metadata formatted in bjorn output style.
+    """
     test_mut_count = 0
-   
-    with open(json_filename,'r') as jfile:
+    with open(json_filename, 'r') as jfile:
         for i, line in enumerate(jfile):
-            row = json.loads(line)
+            row = json.loads(line) 
             currentDT = datetime.datetime.now()
             new_dict = {}
             new_dict['@timestamp'] = currentDT.strftime("%Y-%m-%dT%H:%M:%SZ")
-            #new_dict['_id'] = i
-            new_dict['strain'] = row['strain']
+            new_dict['_id'] = i
+            new_dict['strain'] = str(row['strain'])
             new_dict['country'] = str(row['country'])
-            if str(row['country']) not in countries:
-                countries.append(str(row['country_id']))
             new_dict['country_id'] = str(row['country_id'])
             new_dict['country_lower'] = str(row['country_lower'])
             new_dict['division'] = str(row['division'])
@@ -483,8 +446,10 @@ def generate_actions(json_filename, region_df=None):
             new_dict['date_submitted'] = str(row['date_submitted'])
             new_dict['date_collected'] = str(row['date_collected'])
             new_dict['date_modified'] = str(row['date_modified'])
-            if 'zipcode' in row:
-                if str(row['zipcode']).isdigit() and int(row['zipcode']) > 0:     
+
+            if str(row['zipcode']).isdigit() and int(row['zipcode']) > 0:
+           
+                if 91901 <= int(row['zipcode'])  <= 92199:
                     new_dict['zipcode'] = str(row['zipcode'])
                     if region_df != None:
                         new_dict['region'] = region_df.loc[region_df['ZIP'] == int(row['zipcode'])]['Region']
@@ -521,21 +486,10 @@ def generate_actions(json_filename, region_df=None):
                     if 'aa_map_coords'  in mut:
                         temp['aa_map_coords'] = mut['aa_map_coords']
                     temp_list.append(temp) 
-           
+            #print(temp_list)
             new_dict['mutations'] = temp_list
+            #print(test_mut_count)    
             yield new_dict
-
-def generate_epi_index(epi_data):
-    for epi in epi_data:
-        new_dict = {}
-        new_dict["zipcode"] = str(epi["zipcode"])
-        new_dict["total_cases"]=str(epi["total_cases"])
-        new_dict["new_cases_in_7_day_case_rate"] = str(epi["new_cases_in_7_day_case_rate"])
-        new_dict["current_date_range"] = str(epi["current_date_range"])
-        new_dict["f7_day_average_case_rate"]=str(epi["f7_day_average_case_rate"])
-        print(new_dict)
-        yield(new_dict)
-
 
 def main():
     """
@@ -545,14 +499,8 @@ def main():
     
     Parameters
     ----------
-    json : str
+    json_filename : str
         Path to the metadata file.
-    zipcode :str
-        Path to the file with zipcode geojson data.
-    config : str
-        Path to the config file.
-    hostname : str
-        The host address.
     """
     
     #tutorial on how to connect this to docker es
@@ -571,80 +519,48 @@ def main():
     json_filename = args.json
     hostname = args.hostname
     config_filename = args.config
-    print("Hostname ", hostname)
-    print("Zipcodes ", zipcodes)
+    data = download_dataset(json_filename)
     
-    client = Elasticsearch(hosts=[{'host': '%s' %hostname}], retry_on_timeout=True, maxsize=25)
-    
-    #default epi data to None
-    epi_data = None
-
-        #check for a zipcode config file and epi information
+    unique_countries = []
+    unique_divisions = []
+    for item in data:
+        if item['country_id'] not in unique_countries and item['country_id'] != 'None':
+            unique_countries.append(item['country_id'])
+        if item['division_id'] not in unique_divisions:
+            unique_divisions.append(item['division_id'])
+    get_gpkg(unique_countries)
+    client = Elasticsearch(hosts=[{'host': '%s' %hostname}], retry_on_timeout=True)
+   
+    #check for a config file
     if zipcodes is None:
         with open(config_filename,'r') as json_file:
             config = json.load(json_file)
             param = config['pathToZipcodes']
-            #make sure the file exists          
             if os.path.isfile(param):
                 zipcodes = param
-                   
-            #only bother with epi if we have the geojson for zipcodes
-            if zipcodes is not None:    
-                epi_location = config['zipcodeEpi']
-                
-                #make sure we can access the epi data and it matches our geojson
-                epi_data = test_epi_availability(epi_location, zipcodes)
-            
-    if epi_data is not None:
-        create_epi(client)
-        progress = tqdm.tqdm(unit="docs", total=123)
-        successes = 0
-            
-        for ok, action in streaming_bulk(
-            client=client, index="epi", actions=generate_epi_index(epi_data),
-        ):
-            progress.update(1)
-            successes += ok
-        
-        print("Indexed %d/%d documents", successes, 123)
- 
-         
+
+
     #if we have a zipcode file provided we process it
     if zipcodes is not None: 
         create_zipcode(client)
-        progress = tqdm.tqdm(unit="docs", total=500)
+        print("Indexing shapes...")
+        progress = tqdm.tqdm(unit="docs", total=123)
         successes = 0
-            
+        
         for ok, action in streaming_bulk(
             client=client, index="zipcodes", actions=simplify_gpk_zipcode(zipcodes),
         ):
             progress.update(1)
             successes += ok
         
-        print("Indexed %d/%d documents", successes, 500)
-    
-    create_index(client)
-    client.indices.put_settings(index="hcov19", body={
-    "index.refresh_interval": "1s",
-    })    
-    
-    #parallel bulk
-    progress = tqdm.tqdm(unit="docs", total=5000000)
-    successes = 0
-    for ok, action in parallel_bulk(
-        client=client, index="hcov19", actions=generate_actions(json_filename), thread_count=8, chunk_size=5000,\
-        queue_size=5
-    ):  
-        progress.update(1)
-        if ok:
-            successes += ok
-   
+        print("Indexed %d/%d documents", successes, 123)
+        
     create_polygon(client)
+     
+    #open the reigion-zipcode df
+    #region_df = pd.read_csv("SanDiegoZIP_region.csv")
     
-    #handle geojson shapes not related to zipcode
-    unique_countries = np.unique(countries)   
-    get_gpkg(unique_countries)
-    
+    print("Indexing shapes...")
     progress = tqdm.tqdm(unit="docs", total=5342)
     successes = 0
     
@@ -654,9 +570,29 @@ def main():
         progress.update(1)
         successes += ok
         
-     
-    if config['esSnapshot'] == 'True':
-        create_snapshot(client)
+    print("Indexed %d/%d documents" % (successes, 5342))
+
+    #handle hcov19 things
+    create_index(client)
+    client.indices.put_settings(index="hcov19", body={
+    "index.refresh_interval": "1s",
+    })    
+    
+    #parallel bulk ingestion
+    success = 0
+    fails = 0
+    for ok, action in parallel_bulk(
+        client=client, index="hcov19", actions=generate_actions(json_filename), \
+        thread_count=8, chunk_size=5000, queue_size=5
+    ):  
+        if ok:
+            success += 1
+        else:
+            fails += 1
+    print("%s documents successfully ingested" %success)
+    print("%s documented failed to ingest" %fails)
+  
+    #create_snapshot(client)
 
 if __name__ == "__main__":
     main()
