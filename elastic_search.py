@@ -10,6 +10,7 @@ import argparse
 import shapely
 import datetime
 import shapefile
+import numpy as np
 import tqdm
 import urllib3
 import requests
@@ -20,6 +21,7 @@ from elasticsearch.helpers import streaming_bulk, parallel_bulk
 from shapely.geometry import shape as sh
 from shapely.geometry import GeometryCollection
 
+countries = []
 def test_epi_availability(epi_location, zipcodes):
     """
     Given a zipcode epi filepath or url, determine whether 
@@ -46,14 +48,14 @@ def test_epi_availability(epi_location, zipcodes):
     #if the zipcode match out geojson data  
     correct_zipcodes = False    
     epi_data = []
-
+   
     #figure out if we have epi data
     #try and get url epi
     response = requests.get(epi_location)
     if response.status_code == 200:
         have_resource = True
         resource_load = response.json()
-
+        
     #if its not a url try and find it locally
     else:
         if os.path.isfile(epi_location):
@@ -65,7 +67,7 @@ def test_epi_availability(epi_location, zipcodes):
 
             except:
                 print("loading epi data failed: data file isn't in json format.")
- 
+    
     #if we have epi data make sure it's correct
     if have_resource:
         #now we load the zipcode data for comparison
@@ -74,8 +76,7 @@ def test_epi_availability(epi_location, zipcodes):
             zip_data = json.load(jsonfile)
             for zd in zip_data["features"]:
                 geojson_zipcodes.append(zd["properties"]["zip"])
-        
-        
+         
         #iterate all epi data
         for location_data in resource_load["features"]:  
             temp_zip = str(location_data["attributes"]["zip_code"])
@@ -100,6 +101,23 @@ def test_epi_availability(epi_location, zipcodes):
     #we don't have epi data
     else:
         return(None)
+
+def generate_epi_index(epi_data):
+    """
+    Generate data to ingest into epi ElasticSearch.
+
+    Parameters
+    ----------
+    
+    """
+    for epi in epi_data:
+        new_dict = {}
+        new_dict["zipcode"] = str(epi["zipcode"])
+        new_dict["total_cases"]=str(epi["total_cases"])
+        new_dict["new_cases_in_7_day_case_rate"] = str(epi["new_cases_in_7_day_case_rate"])
+        new_dict["current_date_range"] = str(epi["current_date_range"])
+        new_dict["f7_day_average_case_rate"]=str(epi["f7_day_average_case_rate"])
+        yield(new_dict)
 
 def create_snapshot(es):
     snapshot_body = {
@@ -144,7 +162,6 @@ def simplify_gpk_zipcode(location):
     for c,feature in enumerate(geojson_list): 
         new_dict = {}
         geojson_temp = { "type": "Feature"}
-        print("OY", feature.keys())
         zipcode = feature['properties']['zip']
         zipcode_name = feature['properties']['community']
         from collections.abc import Iterable
@@ -429,6 +446,8 @@ def generate_actions(json_filename):
             new_dict['_id'] = i
             new_dict['strain'] = str(row['strain'])
             new_dict['country'] = str(row['country'])
+            if str(row['country']) not in countries:
+                countries.append(str(row['country_id']))
             new_dict['country_id'] = str(row['country_id'])
             new_dict['country_lower'] = str(row['country_lower'])
             new_dict['division'] = str(row['division'])
@@ -448,14 +467,7 @@ def generate_actions(json_filename):
             new_dict['date_modified'] = str(row['date_modified'])
 
             if str(row['zipcode']).isdigit() and int(row['zipcode']) > 0:
-           
-                if 91901 <= int(row['zipcode'])  <= 92199:
-                    new_dict['zipcode'] = str(row['zipcode'])
-                    if region_df != None:
-                        new_dict['region'] = region_df.loc[region_df['ZIP'] == int(row['zipcode'])]['Region']
-                else:
-                    new_dict['zipcode'] = 'None'
-                    new_dict['region'] = "None"
+                new_dict['zipcode'] = str(row['zipcode'])
             else:
                 new_dict['region'] = "None"
                 new_dict['zipcode'] = "None"
@@ -491,6 +503,40 @@ def generate_actions(json_filename):
             #print(test_mut_count)    
             yield new_dict
 
+def create_epi(client):
+    """
+    Creates the ES index for the epi data.
+    
+    Parameters
+    ----------
+    client :
+        ElasticSearch client.
+    """
+    client.indices.create(
+        index="epi",
+        body={
+            "settings": {"number_of_shards": 10,
+                "analysis": {
+                    "normalizer": {
+                        "keyword_lowercase": {
+                        "type": "custom",
+                        "filter": ["lowercase"]
+                        }
+                    }
+                }
+            },             
+            "mappings": {
+            "properties": {
+                "zipcode" : {"type":"keyword"},
+                "total_cases" : {"type": "keyword"},
+                "new_cases_in_7_day_case_rate" : {"type": "keyword"},
+                "current_date_range" : {"type": "keyword"},
+                "f7_day_average_case_rate" : {"type": "keyword"}
+                },
+            },
+        },
+        ignore=400,)
+
 def main():
     """
     Script takes in a json file containing metadata processed
@@ -519,31 +565,42 @@ def main():
     json_filename = args.json
     hostname = args.hostname
     config_filename = args.config
-    data = download_dataset(json_filename)
-    
-    unique_countries = []
-    unique_divisions = []
-    for item in data:
-        if item['country_id'] not in unique_countries and item['country_id'] != 'None':
-            unique_countries.append(item['country_id'])
-        if item['division_id'] not in unique_divisions:
-            unique_divisions.append(item['division_id'])
-    get_gpkg(unique_countries)
-    client = Elasticsearch(hosts=[{'host': '%s' %hostname}], retry_on_timeout=True)
-   
-    #check for a config file
+
+    epi_data = None
+
+    #check for a zipcode config file and epi information
     if zipcodes is None:
         with open(config_filename,'r') as json_file:
             config = json.load(json_file)
             param = config['pathToZipcodes']
+            #make sure the file exists          
             if os.path.isfile(param):
                 zipcodes = param
+                   
+            #only bother with epi if we have the geojson for zipcodes
+            if zipcodes is not None:    
+                epi_location = config['zipcodeEpi']
+                
+                #make sure we can access the epi data and it matches our geojson
+                epi_data = test_epi_availability(epi_location, zipcodes)
 
+    client = Elasticsearch(hosts=[{'host': '%s' %hostname}], retry_on_timeout=True)
+    #handle epi data if we have it
+    if epi_data is not None:
+        create_epi(client)
+        successes = 0
+            
+        for ok, action in streaming_bulk(
+            client=client, index="epi", actions=generate_epi_index(epi_data),
+        ):
+            successes += ok
+        
+    
 
     #if we have a zipcode file provided we process it
     if zipcodes is not None: 
         create_zipcode(client)
-        print("Indexing shapes...")
+        print("Indexing zipcodes...")
         progress = tqdm.tqdm(unit="docs", total=123)
         successes = 0
         
@@ -556,21 +613,19 @@ def main():
         print("Indexed %d/%d documents", successes, 123)
         
     create_polygon(client)
-     
-    #open the reigion-zipcode df
-    #region_df = pd.read_csv("SanDiegoZIP_region.csv")
-    
+       
     print("Indexing shapes...")
-    progress = tqdm.tqdm(unit="docs", total=5342)
     successes = 0
-    
+       
+    #handle geojson shapes not related to zipcode
+    unique_countries = np.unique(countries)   
+    get_gpkg(unique_countries)
+ 
     for ok, action in streaming_bulk(
         client=client, index="shape", actions=simplify_gpkg(),
     ):
         progress.update(1)
         successes += ok
-        
-    print("Indexed %d/%d documents" % (successes, 5342))
 
     #handle hcov19 things
     create_index(client)
