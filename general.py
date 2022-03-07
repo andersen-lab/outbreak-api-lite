@@ -413,10 +413,12 @@ class LabCounts(BaseHandler):
         for thing in resp['hits']['hits']:
             thing = thing["_source"]
             if thing['originating_lab'] in lab_counts:
-                lab_counts[thing['originating_lab']] += 1
+                lab_counts[thing['originating_lab']]['count'] += 1
             else:
-                lab_counts[thing['originating_lab']] = 1
-
+                lab_counts[thing['originating_lab']] = {}
+                lab_counts[thing['originating_lab']]['count'] = 1
+                lab_counts[thing['originating_lab']]['name'] = thing['originating_lab']
+ 
         bookmark = [resp['hits']['hits'][-1]['sort'][0], str(resp['hits']['hits'][-1]['sort'][1])]
         query["search_after"]= bookmark   
         while len(resp['hits']['hits']) < size:
@@ -425,14 +427,19 @@ class LabCounts(BaseHandler):
                 resp['hits']['hits'].append(el)
                 bookmark = [res['hits']['hits'][-1]['sort'][0], str(resp['hits']['hits'][-1]['sort'][1])]
 
-            for thing in resp['hits']['hits']:
-                thing = thing["_source"]
+            
+                thing = el["_source"]
                 if thing['originating_lab'] in lab_counts:
-                    lab_counts[thing['originating_lab']] += 1
+                    lab_counts[thing['originating_lab']]['count'] += 1
                 else:
-                    lab_counts[thing['originating_lab']] = 1
+                    lab_counts[thing['originating_lab']] = {}
+                    lab_counts[thing['originating_lab']]['count'] = 1
+                    lab_counts[thing['originating_lab']]['name'] = thing['originating_lab']
+        return_counts = []
         
-        resp = {"success": True, "results": lab_counts}
+        for key, value in lab_counts.items():
+            return_counts.append(value)
+        resp = {"success": True, "results": return_counts}
         self.write(resp)
 
 class CaseCounts(BaseHandler):

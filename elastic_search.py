@@ -134,6 +134,7 @@ def create_snapshot(es):
     "indices": "shape,zipcodes,hcov19"
     }
     es.snapshot.create(repository='backup', snapshot='test_snapshot', body=index_body)
+
 def get_gpkg(countries):
     """
     Parameters
@@ -395,6 +396,8 @@ def create_index(client):
                  "accession_id": {"type": "keyword"},
                  "zipcode" : {"type": "keyword"},
                  "region": {"type": "keyword"},
+                 "originating_lab" : {"type": "keyword"},
+                 "authors": {"type": "keyword"},
                  
                  "mutations" : {"type" : "nested",
                     "properties":{
@@ -439,13 +442,15 @@ def generate_actions(json_filename):
     test_mut_count = 0
     with open(json_filename, 'r') as jfile:
         for i, line in enumerate(jfile):
-            row = json.loads(line) 
+            row = json.loads(line)
             currentDT = datetime.datetime.now()
             new_dict = {}
             new_dict['@timestamp'] = currentDT.strftime("%Y-%m-%dT%H:%M:%SZ")
             new_dict['_id'] = i
             new_dict['strain'] = str(row['strain'])
             new_dict['country'] = str(row['country'])
+            new_dict['originating_lab'] = str(row['originating_lab'])
+            new_dict['authors'] = str(row['authors'])
             if str(row['country']) not in countries:
                 countries.append(str(row['country_id']))
             new_dict['country_id'] = str(row['country_id'])
@@ -601,16 +606,13 @@ def main():
     if zipcodes is not None: 
         create_zipcode(client)
         print("Indexing zipcodes...")
-        progress = tqdm.tqdm(unit="docs", total=123)
         successes = 0
         
         for ok, action in streaming_bulk(
             client=client, index="zipcodes", actions=simplify_gpk_zipcode(zipcodes),
         ):
-            progress.update(1)
             successes += ok
         
-        print("Indexed %d/%d documents", successes, 123)
         
     create_polygon(client)
        
@@ -624,8 +626,7 @@ def main():
     for ok, action in streaming_bulk(
         client=client, index="shape", actions=simplify_gpkg(),
     ):
-        progress.update(1)
-        successes += ok
+        successes += 1
 
     #handle hcov19 things
     create_index(client)
