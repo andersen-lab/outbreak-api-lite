@@ -5,7 +5,7 @@ from general import LocationHandler, Shape, Zipcode, ShapeByZipcode
 from elasticsearch import AsyncElasticsearch, Elasticsearch
 from lineage import LineageByCountryHandler, LineageByDivisionHandler, LineageAndCountryHandler, LineageAndDivisionHandler, LineageHandler, LineageMutationsHandler, MutationDetailsHandler, MutationsByLineage
 from prevalence import GlobalPrevalenceByTimeHandler, PrevalenceByLocationAndTimeHandler, CumulativePrevalenceByLocationHandler, PrevalenceAllLineagesByLocationHandler, PrevalenceByAAPositionHandler
-from general import LocationHandler, LocationDetailsHandler, MetadataHandler, MutationHandler, SubmissionLagHandler, SequenceCountHandler, MostRecentSubmissionDateHandler, MostRecentCollectionDateHandler, GisaidIDHandler, CaseCounts
+from general import LocationHandler, LocationDetailsHandler, MetadataHandler, MutationHandler, SubmissionLagHandler, SequenceCountHandler, MostRecentSubmissionDateHandler, MostRecentCollectionDateHandler, GisaidIDHandler, CaseCounts, LabCounts
 
 parser = argparse.ArgumentParser(description='Start tornado server.')
 parser.add_argument('--hostname', nargs="?",const="es",help='Hostname in case not being run via docker.', required=False)
@@ -20,6 +20,7 @@ if __name__ == "__main__":
         (r"/zipcodes/shape", ShapeByZipcode, dict(db=es,db2=na)),
         (r"/epi/casecounts", CaseCounts, dict(db=es,db2=na)),
         (r"/hcov19/get-zipcodes", Zipcode, dict(db=es, db2=na)),
+        (r"/hcov19/labcounts", LabCounts, dict(db=es, db2=na)),
         (r"/hcov19/location", LocationHandler, dict(db=es,db2=na)),
         (r"/hcov19/lineage-by-country", LineageByCountryHandler, dict(db=es,db2=na)),
         (r"/hcov19/lineage-and-country", LineageAndCountryHandler, dict(db=es,db2=na)),

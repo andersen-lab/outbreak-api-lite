@@ -391,6 +391,50 @@ class Zipcode(BaseHandler):
         resp = {"success": True, "results": flattened_response}
         self.write(resp)
 
+class LabCounts(BaseHandler):
+    @gen.coroutine
+    def get(self):
+        response = ''
+        flattened_response = []
+        results={}
+        query = {
+            "query": {"bool": {
+                "must": []
+                }
+            }
+        }
+        res = yield self.asynchronous_fetch_count(query)
+        size = res['count'] 
+        query["sort"]=[{"date_collected": "asc", "_id": "asc"}]
+        query['size'] = 10000
+        lab_counts = {}
+        resp = yield self.asynchronous_fetch(query)
+        #record the stuff
+        for thing in resp['hits']['hits']:
+            thing = thing["_source"]
+            if thing['originating_lab'] in lab_counts:
+                lab_counts[thing['originating_lab']] += 1
+            else:
+                lab_counts[thing['originating_lab']] = 1
+
+        bookmark = [resp['hits']['hits'][-1]['sort'][0], str(resp['hits']['hits'][-1]['sort'][1])]
+        query["search_after"]= bookmark   
+        while len(resp['hits']['hits']) < size:
+            res = yield self.asynchronous_fetch(query)
+            for el in res['hits']['hits']:
+                resp['hits']['hits'].append(el)
+                bookmark = [res['hits']['hits'][-1]['sort'][0], str(resp['hits']['hits'][-1]['sort'][1])]
+
+            for thing in resp['hits']['hits']:
+                thing = thing["_source"]
+                if thing['originating_lab'] in lab_counts:
+                    lab_counts[thing['originating_lab']] += 1
+                else:
+                    lab_counts[thing['originating_lab']] = 1
+        
+        resp = {"success": True, "results": lab_counts}
+        self.write(resp)
+
 class CaseCounts(BaseHandler):
 
     @gen.coroutine
